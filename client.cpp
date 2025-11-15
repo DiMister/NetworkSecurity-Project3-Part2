@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include "./certs/certParser.hpp"
+#include <algorithm>
 
 int main(int argc, char* argv[]) {
     std::string server_ip = "127.0.0.1";
@@ -31,8 +32,9 @@ int main(int argc, char* argv[]) {
     namespace fs = std::filesystem;
     pki487::CertGraph certGraph;
     int certs_added = 0;
-    if (fs::exists("./certsFiles") && fs::is_directory("./certsFiles")) {
-        for (auto &entry : fs::directory_iterator("./certsFiles")) {
+    string cert_path = "./certFiles";
+    if (fs::exists(cert_path) && fs::is_directory(cert_path)) {
+        for (auto &entry : fs::directory_iterator(cert_path)) {
             if (!entry.is_regular_file()) continue;
             // read file contents
             std::ifstream in(entry.path(), std::ios::binary);
@@ -48,7 +50,6 @@ int main(int argc, char* argv[]) {
         certGraph.build_edges();
     }
     std::cout << "Loaded " << certs_added << " certificate(s) into CertGraph\n";
-    // Note: certGraph is local to main; you can keep it or move it to a wider scope if needed.
 
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
