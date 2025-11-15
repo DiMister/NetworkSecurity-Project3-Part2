@@ -1,3 +1,5 @@
+g++ -std=c++17 client.cpp Helpers/*.cpp certs/*.cpp -pthread -o client
+g++ -std=c++17 server.cpp Helpers/*.cpp certs/*.cpp -pthread -o server
 
 // alice
 -----BEGIN RSA PUBLIC KEY-----
