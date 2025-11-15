@@ -1,5 +1,6 @@
 #include "certParser.hpp"
 #include "io.hpp"
+#include "../publicKeys.hpp"
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -12,6 +13,33 @@ namespace pki487 {
 std::optional<std::error_code> CertGraph::add_cert_from_text(const std::string& text) {
     try {
         Cert487 c = Cert487::parse(text);
+        // Verify signature using issuer's public key. The issuer's public key may be available
+        // from previously added certificates (search _nodes by subject), or from the static
+        // known public key map (publicKeys.hpp). If no public key is found or verification
+        // fails, reject the certificate and return an error.
+        std::vector<unsigned char> sig_bytes = c.signature_bytes();
+        std::string tbs = c.serialize_tbs();
+        std::optional<pki487::keypair> issuer_pub;
+        // Look for an issuer cert already present in the graph
+        for (const auto &kv : _nodes) {
+            if (kv.second.subject == c.issuer) {
+                issuer_pub = kv.second.cert.subject_pubkey_pem;
+                break;
+            }
+        }
+        // Fallback to compile-time known public keys
+        if (!issuer_pub) {
+            auto pk = pki487::lookup_public_key(c.issuer);
+            if (pk.has_value()) issuer_pub = pki487::keypair{pk->n, pk->e};
+        }
+        if (!issuer_pub) {
+            // Can't verify without issuer public key
+            return std::make_error_code(std::errc::permission_denied);
+        }
+        // Verify signature using RSA helper
+        if (!pki487::Rsa::verify_message(tbs, *issuer_pub, sig_bytes)) {
+            return std::make_error_code(std::errc::invalid_argument);
+        }
         CertNode node;
         node.serial = c.serial;
         node.subject = c.subject;
@@ -24,6 +52,36 @@ std::optional<std::error_code> CertGraph::add_cert_from_text(const std::string& 
     } catch (const std::exception& ex) {
         return std::make_error_code(std::errc::invalid_argument);
     }
+}
+
+std::optional<std::error_code> CertGraph::add_cert_from_file(const std::string& filepath) {
+    try {
+        std::ifstream in(filepath, std::ios::binary);
+        if (!in) return std::make_error_code(std::errc::no_such_file_or_directory);
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        std::string txt = ss.str();
+        if (txt.find("-----BEGIN CERT487-----") == std::string::npos) {
+            return std::make_error_code(std::errc::invalid_argument);
+        }
+        return add_cert_from_text(txt);
+    } catch (...) {
+        return std::make_error_code(std::errc::io_error);
+    }
+}
+
+std::optional<int> CertGraph::add_certs_from_directory(const std::string& dirpath) {
+    namespace fs = std::filesystem;
+    if (!fs::exists(dirpath) || !fs::is_directory(dirpath)) return std::nullopt;
+    int added = 0;
+    for (auto &entry : fs::directory_iterator(dirpath)) {
+        if (!entry.is_regular_file()) continue;
+        auto ec = add_cert_from_file(entry.path().string());
+        if (!ec.has_value()) ++added;
+    }
+    // Build edges after adding all
+    build_edges();
+    return added;
 }
 
 void CertGraph::build_edges() {

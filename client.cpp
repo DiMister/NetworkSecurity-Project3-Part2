@@ -28,27 +28,10 @@ int main(int argc, char* argv[]) {
     if (argc >= 2) server_ip = argv[1];
     if (argc >= 3) port = static_cast<uint16_t>(std::stoi(argv[2]));
 
-    // Load certificates from ./certs into a CertGraph instance
-    namespace fs = std::filesystem;
     pki487::CertGraph certGraph;
     int certs_added = 0;
-    string cert_path = "./certFiles";
-    if (fs::exists(cert_path) && fs::is_directory(cert_path)) {
-        for (auto &entry : fs::directory_iterator(cert_path)) {
-            if (!entry.is_regular_file()) continue;
-            // read file contents
-            std::ifstream in(entry.path(), std::ios::binary);
-            if (!in) continue;
-            std::ostringstream ss;
-            ss << in.rdbuf();
-            std::string txt = ss.str();
-            // only attempt to parse files that look like Cert487 files
-            if (txt.find("-----BEGIN CERT487-----") == std::string::npos) continue;
-            auto ec = certGraph.add_cert_from_text(txt);
-            if (!ec.has_value()) ++certs_added;
-        }
-        certGraph.build_edges();
-    }
+    auto added = certGraph.add_certs_from_directory("./certFiles");
+    if (added.has_value()) certs_added = *added;
     std::cout << "Loaded " << certs_added << " certificate(s) into CertGraph\n";
 
     int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -74,7 +57,16 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Connected to " << server_ip << ":" << port << "\n";
 
-    // Alice's RSA keys (n,e,d)
+    // Load primes and math utilities used later for DH and RSA helpers
+    MathUtils mathUtils;
+    std::vector<int> primes = mathUtils.loadPrimes("./primes.csv");
+    if (primes.size() < 2) {
+        std::cerr << "Not enough primes in primes.csv\n";
+        close(sock);
+        return 1;
+    }
+
+    // Alice's RSA keys (n,e,d) - small example values
     int n = 769864357, e = 142112703, d = 409609311;
 
     // Send our public key to server: RSA_PUB <n> <e>\n

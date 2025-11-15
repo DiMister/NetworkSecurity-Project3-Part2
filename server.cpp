@@ -9,11 +9,12 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include "./Helpers/net_utils.h"
-#include "./Helpers/FastModExp.h"
-#include "./Helpers/MathUtils.h"
-#include "./Helpers/DiffeHellman.h"
-#include "./Helpers/SDESModes.h"
+#include "./Helpers/net_utils.hpp"
+#include "./Helpers/FastModExp.hpp"
+#include "./Helpers/MathUtils.hpp"
+#include "./Helpers/DiffeHellman.hpp"
+#include "./Helpers/SDESModes.hpp"
+#include "./certs/certParser.hpp"
 #include <bitset>
 #include <thread>
 #include <sstream>
@@ -22,6 +23,12 @@
 int main(int argc, char* argv[]) {
     uint16_t port = 8421;
     if (argc >= 2) port = static_cast<uint16_t>(std::stoi(argv[1]));
+
+    pki487::CertGraph certGraph;
+    int certs_added = 0;
+    auto added = certGraph.add_certs_from_directory("./certFiles");
+    if (added.has_value()) certs_added = *added;
+    std::cout << "Loaded " << certs_added << " certificate(s) into CertGraph\n";
 
     int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_sock == -1) {
