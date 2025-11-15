@@ -66,6 +66,10 @@
     "xtree": "cpp",
     "numbers": "cpp",
     "numeric": "cpp",
-        "numeric": "cpp"
+    "filesystem": "cpp",
+    "list": "cpp",
+    "unordered_map": "cpp",
+    "unordered_set": "cpp",
+    "xhash": "cpp"
   }
 }

@@ -1,54 +1,45 @@
-# NetworkSecurity-Project2
-This project implements a Diffie-Hellman key exchange and RSA signtures demonstration with client-server communication and S-DES encryption.
-### Compilation wsl
-```bash
-# Compile server
-g++ -std=c++17 -o server server.cpp Helpers/DiffeHellman.cpp Helpers/net_utils.cpp Helpers/SDESModes.cpp Helpers/SDES.cpp Helpers/FastModExp.cpp Helpers/MathUtils.cpp
 
-# Compile client  
-g++ -std=c++17 -o client client.cpp Helpers/DiffeHellman.cpp Helpers/net_utils.cpp Helpers/SDESModes.cpp Helpers/SDES.cpp Helpers/FastModExp.cpp Helpers/MathUtils.cpp
+// alice
+-----BEGIN RSA PUBLIC KEY-----
+N: 769864357
+E: 142112703
+-----END RSA PUBLIC KEY-----
 
-# Compile CBC Hash demo
-g++ -std=c++17 -o cbchash CBCHash.cpp Helpers/SDESModes.cpp Helpers/SDES.cpp
-```
-### Compilation Mac
-```bash
-# Compile server
-clang++ -std=c++17 -o server server.cpp Helpers/DiffeHellman.cpp Helpers/net_utils.cpp Helpers/SDESModes.cpp Helpers/SDES.cpp Helpers/FastModExp.cpp Helpers/MathUtils.cpp
+-----BEGIN RSA PRIVATE KEY-----
+N: 769864357
+D: 409609311
+-----END RSA PRIVATE KEY-----
 
-# Compile client  
-clang++ -std=c++17 -o client client.cpp Helpers/DiffeHellman.cpp Helpers/net_utils.cpp Helpers/SDESModes.cpp Helpers/SDES.cpp Helpers/FastModExp.cpp Helpers/MathUtils.cpp
+// wurth
+-----BEGIN RSA PUBLIC KEY-----
+N: 747139123
+E: 59166705
+-----END RSA PUBLIC KEY-----
 
-# Compile CBC Hash demo
-clang++ -std=c++17 -o cbchash CBCHash.cpp Helpers/SDESModes.cpp Helpers/SDES.cpp
-```
+-----BEGIN RSA PRIVATE KEY-----
+N: 747139123
+D: 742962953
+-----END RSA PRIVATE KEY-----
 
+// zach
+-----BEGIN RSA PUBLIC KEY-----
+N: 29151883
+E: 26453285
+-----END RSA PUBLIC KEY-----
 
-### Running the Diffie-Hellman Demo
+-----BEGIN RSA PRIVATE KEY-----
+N: 29151883
+D: 19482893
+-----END RSA PRIVATE KEY-----
 
-**Note**: Ensure `primes.csv` is in the project root directory before running.
+// bob
+-----BEGIN RSA PUBLIC KEY-----
+N: 836287813
+E: 663980159
+-----END RSA PUBLIC KEY-----
 
-**Terminal 1 - Start the server:**
-```bash
-./server [port]
-# Example: ./server 8421
-# Default port is 8421 if not specified
-```
-
-**Terminal 2 - Run the client:**
-```bash
-./client [server_ip] [port]
-# Example: ./client 127.0.0.1 8421
-# Default: connects to localhost:8421
-```
-
-### Running the CBC Hash Demo
-```bash
-./cbchash [key]
-# Example: ./cbchash 1000000000
-# Default key is 1000000000 if not specified
-# Enter strings to hash, type 'quit' to exit
-```
-
-   
+-----BEGIN RSA PRIVATE KEY-----
+N: 836287813
+D: 707411039
+-----END RSA PRIVATE KEY-----
 

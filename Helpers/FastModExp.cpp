@@ -1,4 +1,4 @@
-#include "FastModExp.h"
+#include "FastModExp.hpp"
 #include <stdexcept>
 
 // Use wider intermediate when available; unsigned version

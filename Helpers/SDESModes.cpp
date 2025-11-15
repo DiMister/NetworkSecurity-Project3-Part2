@@ -1,4 +1,4 @@
-#include "SDESModes.h"
+#include "SDESModes.hpp"
 #include <random>
 #include <chrono>
 

@@ -8,21 +8,47 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <random>
-#include "./Helpers/net_utils.h"
-#include "./Helpers/SDESModes.h"
-#include "./Helpers/MathUtils.h"
-#include "./Helpers/FastModExp.h"
-#include "./Helpers/DiffeHellman.h"
+#include "./Helpers/net_utils.hpp"
+#include "./Helpers/SDESModes.hpp"
+#include "./Helpers/MathUtils.hpp"
+#include "./Helpers/FastModExp.hpp"
+#include "./Helpers/DiffeHellman.hpp"
 #include <bitset>
 #include <sstream>
 #include <iomanip>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include "./certs/certParser.hpp"
 
 int main(int argc, char* argv[]) {
     std::string server_ip = "127.0.0.1";
     uint16_t port = 8421;
     if (argc >= 2) server_ip = argv[1];
     if (argc >= 3) port = static_cast<uint16_t>(std::stoi(argv[2]));
+
+    // Load certificates from ./certs into a CertGraph instance
+    namespace fs = std::filesystem;
+    pki487::CertGraph certGraph;
+    int certs_added = 0;
+    if (fs::exists("./certsFiles") && fs::is_directory("./certsFiles")) {
+        for (auto &entry : fs::directory_iterator("./certsFiles")) {
+            if (!entry.is_regular_file()) continue;
+            // read file contents
+            std::ifstream in(entry.path(), std::ios::binary);
+            if (!in) continue;
+            std::ostringstream ss;
+            ss << in.rdbuf();
+            std::string txt = ss.str();
+            // only attempt to parse files that look like Cert487 files
+            if (txt.find("-----BEGIN CERT487-----") == std::string::npos) continue;
+            auto ec = certGraph.add_cert_from_text(txt);
+            if (!ec.has_value()) ++certs_added;
+        }
+        certGraph.build_edges();
+    }
+    std::cout << "Loaded " << certs_added << " certificate(s) into CertGraph\n";
+    // Note: certGraph is local to main; you can keep it or move it to a wider scope if needed.
 
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {

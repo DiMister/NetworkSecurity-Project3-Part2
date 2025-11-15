@@ -1,6 +1,6 @@
 
-#include "DiffeHellman.h"
-#include "FastModExp.h"
+#include "DiffeHellman.hpp"
+#include "FastModExp.hpp"
 #include <fstream>
 #include <string>
 #include <cctype>

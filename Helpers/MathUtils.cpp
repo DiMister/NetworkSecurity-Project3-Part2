@@ -1,10 +1,10 @@
-#include "MathUtils.h"
+#include "MathUtils.hpp"
 #include <fstream>
 #include <string>
 #include <cctype>
 #include <random>
 #include <set>
-#include "FastModExp.h"
+#include "FastModExp.hpp"
 using namespace std;
 
 vector<int> MathUtils::loadPrimes(const string &path) const {

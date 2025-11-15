@@ -1,7 +1,7 @@
 #ifndef SDESMODES_H
 #define SDESMODES_H
 
-#include "SDES.h"
+#include "SDES.hpp"
 #include <bitset>
 #include <vector>
 #include <string>
