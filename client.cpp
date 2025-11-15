@@ -29,10 +29,9 @@ int main(int argc, char* argv[]) {
     if (argc >= 3) port = static_cast<uint16_t>(std::stoi(argv[2]));
 
     pki487::CertGraph certGraph;
-    certGraph.add_cert_from_text("./certFiles/Zach.cert487");
-    certGraph.add_cert_from_text("./certFiles/Alice.cert487");
-    certGraph.add_cert_from_text("./certFiles/Wurth.cert487");
-
+    certGraph.add_cert_from_file("./certFiles/Zach.cert487");
+    certGraph.add_cert_from_file("./certFiles/Alice.cert487");
+    certGraph.add_cert_from_file("./certFiles/Wurth.cert487");
 
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
@@ -99,7 +98,6 @@ int main(int argc, char* argv[]) {
                 if (*added == 0) {
                     std::cout << "Client: No new certificates were added from server to attempt path verification\n";
                 } else {
-                    std::cout << "Client: Bob certificate not available to check path\n";
                     const std::string &subject = bob_cert.subject;
                     auto res = certGraph.find_path_by_subjects(std::string("Alice"), subject);
                     if (!res.has_value()) {

@@ -26,9 +26,9 @@ int main(int argc, char* argv[]) {
     if (argc >= 2) port = static_cast<uint16_t>(std::stoi(argv[1]));
 
     pki487::CertGraph certGraph;
-    certGraph.add_cert_from_text("./certFiles/Zach.cert487");
-    certGraph.add_cert_from_text("./certFiles/Bob.cert487");
-    certGraph.add_cert_from_text("./certFiles/Wurth.cert487");
+    certGraph.add_cert_from_file("./certFiles/Zach.cert487");
+    certGraph.add_cert_from_file("./certFiles/Bob.cert487");
+    certGraph.add_cert_from_file("./certFiles/Wurth.cert487");
 
     int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_sock == -1) {
@@ -84,6 +84,7 @@ int main(int argc, char* argv[]) {
     // 3) receive CRL (CRL ...) and save it
     pki487::Cert487 alice_cert;
     std::string next_line = recv_line(client_sock);
+    std::string line;
     if (!next_line.empty()) {
         // Expect client's certificate first
         bool cert_saved = false;
@@ -91,23 +92,20 @@ int main(int argc, char* argv[]) {
             cert_saved = parse_and_save_file_message(next_line, "./received_certs", "CERT");
             auto added = certGraph.add_certs_from_directory("./received_certs");
             alice_cert = pki487::Cert487::from_file("./received_certs/Alice.cert487");
-            if (ok) std::cout << "Server: received and saved server certificate to ./received_certs/\n";
-            else std::cerr << "Server: did not receive a valid CERT line from server\n";
 
             // Attempt to find and verify a path from Alice to the received Bob cert.
             if (added.has_value()) {
                 if (*added == 0) {
                     std::cout << "Server: No new certificates were added from server to attempt path verification\n";
                 } else {
-                    std::cout << "Server: Bob certificate not available to check path\n";
-                    const std::string &subject = bob_cert.subject;
-                    auto res = certGraph.find_path_by_subjects(std::string("Alice"), subject);
+                    const std::string &subject = alice_cert.subject;
+                    auto res = certGraph.find_path_by_subjects(std::string("Bob"), subject);
                     if (!res.has_value()) {
-                        std::cout << "Server: Missing nodes for path check (Alice or " << subject << ")\n";
+                        std::cout << "Server: Missing nodes for path check (Bob or " << subject << ")\n";
                     } else if (res->first.empty()) {
-                        std::cout << "Server: No verified path found from Alice to '" << subject << "'\n";
+                        std::cout << "Server: No verified path found from Bob to '" << subject << "'\n";
                     } else {
-                        std::cout << "Server: Found path from Alice to '" << subject << "':\n";
+                        std::cout << "Server: Found path from Bob to '" << subject << "':\n";
                         std::cout << "  Path (serial:subject[trust]): ";
                         for (int s : res->first) {
                             auto itn = certGraph.nodes().find(s);
@@ -123,9 +121,6 @@ int main(int argc, char* argv[]) {
             } else {
                 std::cout << "No new certificates were added from server to attempt path verification\n";
             }
-        } else {
-            // Not a CERT line; keep it for later handling
-            line = next_line;
         }
 
         // Send server's certificate (Bob) back to the client
@@ -165,7 +160,12 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
+    } 
+    else {
+        // Not a CERT line; keep it for later handling
+        line = next_line;
     }
+
 
     auto client_n = alice_cert.subject_pubkey_pem.n;
     auto client_e = alice_cert.subject_pubkey_pem.exponent;
@@ -208,6 +208,7 @@ int main(int argc, char* argv[]) {
         return static_cast<uint32_t>(hashed.back().to_ulong());
     };
 
+    MathUtils mathUtils;
     uint32_t hash1 = cbc_hash(dh_p, dh_g, A, 0u, false);
     std::cout << "Server: CBC hash for (p,g,A) = " << hash1 << "\n";
     bool ok = mathUtils.rsa_verify_uint32(hash1, sigA, client_e, client_n);
