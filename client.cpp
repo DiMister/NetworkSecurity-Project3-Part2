@@ -69,7 +69,8 @@ int main(int argc, char* argv[]) {
     // Alice's RSA keys (n,e,d) - small example values
     int n = 769864357, e = 142112703, d = 409609311;
 
-    // Certificate exchange: send Alice cert to server, then receive server's cert (Bob) and save it
+    pki487::Cert487 bob_cert;
+\    // Certificate exchange: send Alice cert to server, then receive server's cert (Bob) and save it
     try {
         // send Alice cert if present
         std::string alice_path = "./certFiles/Alice.cert487";
@@ -89,29 +90,36 @@ int main(int argc, char* argv[]) {
         if (!cert_line.empty()) {
             bool ok = parse_and_save_file_message(cert_line, "./received_certs", "CERT");
             auto added = certGraph.add_certs_from_directory("./received_certs");
+            bob_cert = pki487::Cert487::from_file("./received_certs/Bob.cert487");
             if (ok) std::cout << "Client: received and saved server certificate to ./received_certs/\n";
             else std::cerr << "Client: did not receive a valid CERT line from server\n";
 
-            // Attempt to find and verify a path from Alice to the incoming cert(s).
-            if (added.has_value() && *added > 0) {
-                bool found_any = false;
-                for (const auto &kv : certGraph.nodes()) {
-                    const auto &subject = kv.second.subject;
-                    if (subject == "Alice") continue; // skip self
+            // Attempt to find and verify a path from Alice to the received Bob cert.
+            if (added.has_value()) {
+                if (*added == 0) {
+                    std::cout << "Client: No new certificates were added from server to attempt path verification\n";
+                } else {
+                    std::cout << "Client: Bob certificate not available to check path\n";
+                    const std::string &subject = bob_cert.subject;
                     auto res = certGraph.find_path_by_subjects(std::string("Alice"), subject);
                     if (!res.has_value()) {
-                        // start or target missing; skip
-                        continue;
-                    }
-                    if (!res->first.empty()) {
-                        found_any = true;
-                        std::cout << "Found path from Alice to '" << subject << "': ";
-                        for (int s : res->first) std::cout << s << " ";
-                        std::cout << "\nMinimum trust on this path: " << res->second << "\n";
-                        break;
+                        std::cout << "Client: Missing nodes for path check (Alice or " << subject << ")\n";
+                    } else if (res->first.empty()) {
+                        std::cout << "Client: No verified path found from Alice to '" << subject << "'\n";
+                    } else {
+                        std::cout << "Client: Found path from Alice to '" << subject << "':\n";
+                        std::cout << "  Path (serial:subject[trust]): ";
+                        for (int s : res->first) {
+                            auto itn = certGraph.nodes().find(s);
+                            if (itn != certGraph.nodes().end()) {
+                                std::cout << s << ":" << itn->second.subject << "[" << itn->second.cert.trust_level << "] ";
+                            } else {
+                                std::cout << s << " ";
+                            }
+                        }
+                        std::cout << "\n  Minimum trust on this path: " << res->second << "\n";
                     }
                 }
-                if (!found_any) std::cout << "No verified path found from Alice to incoming certificate(s)\n";
             } else {
                 std::cout << "No new certificates were added from server to attempt path verification\n";
             }
@@ -121,6 +129,8 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception &e) {
         std::cerr << "Client: certificate exchange error: " << e.what() << "\n";
     }
+
+    unit
 
 
     // After certificate exchange, send a CRL file (hex-encoded) if present

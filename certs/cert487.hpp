@@ -35,6 +35,9 @@ struct Cert487 {
 
     // Parse from full text (throws on error), fills object and returns TBS canonical string as parsed.
     static Cert487 parse(const std::string& text);
+
+    // Read a file from disk and parse into a Cert487 object (throws on error).
+    static Cert487 from_file(const std::string& path);
 };
 
 // Return true if time t is within validity window [not_before, not_after].

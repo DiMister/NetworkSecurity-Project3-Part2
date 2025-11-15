@@ -129,6 +129,11 @@ Cert487 Cert487::parse(const std::string& text) {
     return c;
 }
 
+Cert487 Cert487::from_file(const std::string& path) {
+    auto txt = read_text_file(path);
+    return Cert487::parse(txt);
+}
+
 bool cert_is_time_valid(const Cert487& c, long long t) {
     return t >= c.not_before && t <= c.not_after;
 }

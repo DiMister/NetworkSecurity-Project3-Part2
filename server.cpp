@@ -82,6 +82,7 @@ int main(int argc, char* argv[]) {
     // 1) receive client's certificate (CERT ...) and save it
     // 2) send server's certificate (Bob) back to client
     // 3) receive CRL (CRL ...) and save it
+    pki487::Cert487 alice_cert;
     std::string next_line = recv_line(client_sock);
     if (!next_line.empty()) {
         // Expect client's certificate first
@@ -89,29 +90,38 @@ int main(int argc, char* argv[]) {
         if (next_line.rfind("CERT ", 0) == 0) {
             cert_saved = parse_and_save_file_message(next_line, "./received_certs", "CERT");
             auto added = certGraph.add_certs_from_directory("./received_certs");
-            if (cert_saved) std::cout << "Server: client CERT saved to ./received_certs/\n";
-            else std::cerr << "Server: failed to save client CERT\n";
+            alice_cert = pki487::Cert487::from_file("./received_certs/Alice.cert487");
+            if (ok) std::cout << "Server: received and saved server certificate to ./received_certs/\n";
+            else std::cerr << "Server: did not receive a valid CERT line from server\n";
 
-            // If we added any new certificates, attempt to find a verified path from Bob to each
-            // newly added certificate (by subject). Print the first found path and its min trust.
-            if (added.has_value() && *added > 0) {
-                bool found_any = false;
-                for (const auto &kv : certGraph.nodes()) {
-                    const auto &subject = kv.second.subject;
-                    if (subject == "Bob") continue;
-                    auto res = certGraph.find_path_by_subjects(std::string("Bob"), subject);
-                    if (!res.has_value()) continue; // missing nodes
-                    if (!res->first.empty()) {
-                        found_any = true;
-                        std::cout << "Server: Found path from Bob to '" << subject << "': ";
-                        for (int s : res->first) std::cout << s << " ";
-                        std::cout << "\nMinimum trust on this path: " << res->second << "\n";
-                        break;
+            // Attempt to find and verify a path from Alice to the received Bob cert.
+            if (added.has_value()) {
+                if (*added == 0) {
+                    std::cout << "Server: No new certificates were added from server to attempt path verification\n";
+                } else {
+                    std::cout << "Server: Bob certificate not available to check path\n";
+                    const std::string &subject = bob_cert.subject;
+                    auto res = certGraph.find_path_by_subjects(std::string("Alice"), subject);
+                    if (!res.has_value()) {
+                        std::cout << "Server: Missing nodes for path check (Alice or " << subject << ")\n";
+                    } else if (res->first.empty()) {
+                        std::cout << "Server: No verified path found from Alice to '" << subject << "'\n";
+                    } else {
+                        std::cout << "Server: Found path from Alice to '" << subject << "':\n";
+                        std::cout << "  Path (serial:subject[trust]): ";
+                        for (int s : res->first) {
+                            auto itn = certGraph.nodes().find(s);
+                            if (itn != certGraph.nodes().end()) {
+                                std::cout << s << ":" << itn->second.subject << "[" << itn->second.cert.trust_level << "] ";
+                            } else {
+                                std::cout << s << " ";
+                            }
+                        }
+                        std::cout << "\n  Minimum trust on this path: " << res->second << "\n";
                     }
                 }
-                if (!found_any) std::cout << "Server: No verified path found from Bob to incoming certificate(s)\n";
             } else {
-                std::cout << "Server: No new certificates were added from client to attempt path verification\n";
+                std::cout << "No new certificates were added from server to attempt path verification\n";
             }
         } else {
             // Not a CERT line; keep it for later handling
