@@ -93,40 +93,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Generate RSA keypair for server (small primes from CSV)
-    MathUtils mathUtils;
-    std::vector<int> primes = mathUtils.loadPrimes("./primes.csv");
-    if (primes.size() < 2) {
-        std::cerr << "Server: not enough primes to generate RSA keys\n";
-        close(client_sock);
-        close(listen_sock);
-        return 1;
-    }
-
-    uint32_t p_rsa = static_cast<uint32_t>(mathUtils.pickRandomFrom(primes));
-    uint32_t q_rsa = static_cast<uint32_t>(mathUtils.pickRandomFrom(primes));
-    while (q_rsa == p_rsa) q_rsa = static_cast<uint32_t>(mathUtils.pickRandomFrom(primes));
-    printf("Server: generated RSA primes p=%u q=%u\n", p_rsa, q_rsa);
-
-    unsigned long long n_tmp = static_cast<unsigned long long>(p_rsa) * static_cast<unsigned long long>(q_rsa);
-    uint32_t n = static_cast<uint32_t>(n_tmp);
-    uint32_t totient = (p_rsa - 1u) * (q_rsa - 1u);
-    printf("Server: computed RSA modulus n=%u totient=%u\n", n, totient);
-
-    uint32_t e = mathUtils.findPublicExponent(totient);
-    if (e == 0u) {
-        e = 65537u;
-        if (mathUtils.findGCD(e, totient) != 1u) {
-            std::cerr << "Server: Failed to find suitable public exponent\n";
-            close(client_sock);
-            close(listen_sock);
-            return 1;
-        }
-    }
-    printf("Server: selected public exponent e=%u\n", e);
-
-    uint32_t d = mathUtils.extendedEuclidean(e, totient);
-    printf("Server: computed private exponent d=%u\n", d);
+    // Server's RSA keys (n,e,d)
+    int n = 836287813, e = 663980159, d = 707411039;
 
     // Send server's RSA pub to client
     std::string server_pub = "RSA_PUB " + std::to_string(n) + " " + std::to_string(e) + "\n";
