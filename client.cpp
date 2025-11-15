@@ -77,25 +77,6 @@ int main(int argc, char* argv[]) {
     // Alice's RSA keys (n,e,d)
     int n = 769864357, e = 142112703, d = 409609311;
 
-    // Send our public key to server: RSA_PUB <n> <e>\n
-    std::string publine = "RSA_PUB " + std::to_string(n) + " " + std::to_string(e) + "\n";
-    if (!send_all(sock, publine)) { perror("send"); close(sock); return 1; }
-    // Receive server's RSA pub: "RSA_PUB <n> <e>\n"
-    std::string srv_line = recv_line(sock);
-    if (srv_line.rfind("RSA_PUB ", 0) != 0) {
-        std::cerr << "Expected RSA_PUB from server, got '" << srv_line << "'\n";
-        close(sock);
-        return 1;
-    }
-    unsigned long long server_n_tmp = 0ull;
-    uint32_t server_e = 0u;
-    {
-        std::istringstream iss(srv_line.substr(8));
-        iss >> server_n_tmp >> server_e;
-    }
-    uint32_t server_n = static_cast<uint32_t>(server_n_tmp);
-    std::cout << "Client: received server RSA pub n=" << server_n << " e=" << server_e << std::endl;
-
     // Certificate exchange: send Alice cert to server, then receive server's cert (Bob) and save it
     try {
         // send Alice cert if present
