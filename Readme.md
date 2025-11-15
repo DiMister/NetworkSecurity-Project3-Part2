@@ -1,6 +1,9 @@
 g++ -std=c++17 client.cpp Helpers/*.cpp certs/*.cpp -pthread -o client
 g++ -std=c++17 server.cpp Helpers/*.cpp certs/*.cpp -pthread -o server
 
+clang++ -std=c++17 client.cpp Helpers/*.cpp certs/*.cpp -pthread -O2 -o client
+clang++ -std=c++17 server.cpp Helpers/*.cpp certs/*.cpp -pthread -O2 -o server
+
 // alice
 -----BEGIN RSA PUBLIC KEY-----
 N: 769864357
