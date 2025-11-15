@@ -26,6 +26,14 @@ public:
 	// Parse a certificate file and add it to the graph (replaces existing node with same serial).
 	// Returns std::error_code on failure.
 	std::optional<std::error_code> add_cert_from_text(const std::string& text);
+	// Parse and add a certificate stored in a file. Returns std::nullopt on success,
+	// or an error_code describing the failure to read/parse the file.
+	std::optional<std::error_code> add_cert_from_file(const std::string& filepath);
+
+	// Scan a directory for certificate files and add them. Returns the number of
+	// certificates successfully added, or std::nullopt if the directory doesn't exist
+	// or is not readable.
+	std::optional<int> add_certs_from_directory(const std::string& dirpath);
 
 	// Build edges between nodes: if nodeA.subject == nodeB.issuer then A -> B
 	void build_edges();
