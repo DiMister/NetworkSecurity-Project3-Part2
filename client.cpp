@@ -130,8 +130,8 @@ int main(int argc, char* argv[]) {
         std::cerr << "Client: certificate exchange error: " << e.what() << "\n";
     }
 
-    unit
-
+    auto server_n = bob_cert.subject_pubkey_pem.n;
+    auto server_e = bob_cert.subject_pubkey_pem.exponent;
 
     // After certificate exchange, send a CRL file (hex-encoded) if present
     try {

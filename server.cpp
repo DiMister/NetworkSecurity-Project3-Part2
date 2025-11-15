@@ -167,6 +167,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    auto client_n = alice_cert.subject_pubkey_pem.n;
+    auto client_e = alice_cert.subject_pubkey_pem.exponent;
+
     // Now expect signed Diffie-Hellman init from client: "DH_INIT <p> <g> <A> <sig>\n"
     line = recv_line(client_sock);
     if (line.rfind("DH_INIT ", 0) != 0) {
