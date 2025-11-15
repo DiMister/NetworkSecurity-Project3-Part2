@@ -20,17 +20,15 @@
 #include <sstream>
 #include <iomanip>
 #include <filesystem>
-// net_utils now provides parsing/saving helpers for received file messages
 
 int main(int argc, char* argv[]) {
     uint16_t port = 8421;
     if (argc >= 2) port = static_cast<uint16_t>(std::stoi(argv[1]));
 
     pki487::CertGraph certGraph;
-    int certs_added = 0;
-    auto added = certGraph.add_certs_from_directory("./certFiles");
-    if (added.has_value()) certs_added = *added;
-    std::cout << "Loaded " << certs_added << " certificate(s) into CertGraph\n";
+    certGraph.add_cert_from_text("./certFiles/Zach.cert487");
+    certGraph.add_cert_from_text("./certFiles/Bob.cert487");
+    certGraph.add_cert_from_text("./certFiles/Wurth.cert487");
 
     int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_sock == -1) {
@@ -125,8 +123,31 @@ int main(int argc, char* argv[]) {
         bool cert_saved = false;
         if (next_line.rfind("CERT ", 0) == 0) {
             cert_saved = parse_and_save_file_message(next_line, "./received_certs", "CERT");
+            auto added = certGraph.add_certs_from_directory("./received_certs");
             if (cert_saved) std::cout << "Server: client CERT saved to ./received_certs/\n";
             else std::cerr << "Server: failed to save client CERT\n";
+
+            // If we added any new certificates, attempt to find a verified path from Bob to each
+            // newly added certificate (by subject). Print the first found path and its min trust.
+            if (added.has_value() && *added > 0) {
+                bool found_any = false;
+                for (const auto &kv : certGraph.nodes()) {
+                    const auto &subject = kv.second.subject;
+                    if (subject == "Bob") continue;
+                    auto res = certGraph.find_path_by_subjects(std::string("Bob"), subject);
+                    if (!res.has_value()) continue; // missing nodes
+                    if (!res->first.empty()) {
+                        found_any = true;
+                        std::cout << "Server: Found path from Bob to '" << subject << "': ";
+                        for (int s : res->first) std::cout << s << " ";
+                        std::cout << "\nMinimum trust on this path: " << res->second << "\n";
+                        break;
+                    }
+                }
+                if (!found_any) std::cout << "Server: No verified path found from Bob to incoming certificate(s)\n";
+            } else {
+                std::cout << "Server: No new certificates were added from client to attempt path verification\n";
+            }
         } else {
             // Not a CERT line; keep it for later handling
             line = next_line;

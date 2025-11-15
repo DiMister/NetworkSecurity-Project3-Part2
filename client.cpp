@@ -29,10 +29,10 @@ int main(int argc, char* argv[]) {
     if (argc >= 3) port = static_cast<uint16_t>(std::stoi(argv[2]));
 
     pki487::CertGraph certGraph;
-    int certs_added = 0;
-    auto added = certGraph.add_certs_from_directory("./certFiles");
-    if (added.has_value()) certs_added = *added;
-    std::cout << "Loaded " << certs_added << " certificate(s) into CertGraph\n";
+    certGraph.add_cert_from_text("./certFiles/Zach.cert487");
+    certGraph.add_cert_from_text("./certFiles/Alice.cert487");
+    certGraph.add_cert_from_text("./certFiles/Wurth.cert487");
+
 
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
@@ -107,14 +107,40 @@ int main(int argc, char* argv[]) {
         std::string cert_line = recv_line(sock);
         if (!cert_line.empty()) {
             bool ok = parse_and_save_file_message(cert_line, "./received_certs", "CERT");
+            auto added = certGraph.add_certs_from_directory("./received_certs");
             if (ok) std::cout << "Client: received and saved server certificate to ./received_certs/\n";
             else std::cerr << "Client: did not receive a valid CERT line from server\n";
+
+            // Attempt to find and verify a path from Alice to the incoming cert(s).
+            if (added.has_value() && *added > 0) {
+                bool found_any = false;
+                for (const auto &kv : certGraph.nodes()) {
+                    const auto &subject = kv.second.subject;
+                    if (subject == "Alice") continue; // skip self
+                    auto res = certGraph.find_path_by_subjects(std::string("Alice"), subject);
+                    if (!res.has_value()) {
+                        // start or target missing; skip
+                        continue;
+                    }
+                    if (!res->first.empty()) {
+                        found_any = true;
+                        std::cout << "Found path from Alice to '" << subject << "': ";
+                        for (int s : res->first) std::cout << s << " ";
+                        std::cout << "\nMinimum trust on this path: " << res->second << "\n";
+                        break;
+                    }
+                }
+                if (!found_any) std::cout << "No verified path found from Alice to incoming certificate(s)\n";
+            } else {
+                std::cout << "No new certificates were added from server to attempt path verification\n";
+            }
         } else {
             std::cerr << "Client: no certificate line received from server\n";
         }
     } catch (const std::exception &e) {
         std::cerr << "Client: certificate exchange error: " << e.what() << "\n";
     }
+
 
     // After certificate exchange, send a CRL file (hex-encoded) if present
     try {

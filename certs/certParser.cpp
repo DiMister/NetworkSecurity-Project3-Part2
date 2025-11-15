@@ -40,6 +40,7 @@ std::optional<std::error_code> CertGraph::add_cert_from_text(const std::string& 
         if (!pki487::Rsa::verify_message(tbs, *issuer_pub, sig_bytes)) {
             return std::make_error_code(std::errc::invalid_argument);
         }
+        printf("CertGraph::add_cert_from_text: signature verified for cert serial %d\n", c.serial);
         CertNode node;
         node.serial = c.serial;
         node.subject = c.subject;
@@ -50,6 +51,7 @@ std::optional<std::error_code> CertGraph::add_cert_from_text(const std::string& 
         // We'll repopulate entire index in build_edges to keep consistent
         return std::nullopt;
     } catch (const std::exception& ex) {
+        printf("CertGraph::add_cert_from_text exception: %s\n", ex.what());
         return std::make_error_code(std::errc::invalid_argument);
     }
 }
