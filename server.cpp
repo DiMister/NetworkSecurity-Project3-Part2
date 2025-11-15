@@ -19,6 +19,8 @@
 #include <thread>
 #include <sstream>
 #include <iomanip>
+#include <filesystem>
+// net_utils now provides parsing/saving helpers for received file messages
 
 int main(int argc, char* argv[]) {
     uint16_t port = 8421;
@@ -112,6 +114,62 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     std::cout << "Server: sent RSA_PUB " << n << " " << e << "\n";
+
+    // After sending RSA pubkey, perform certificate exchange:
+    // 1) receive client's certificate (CERT ...) and save it
+    // 2) send server's certificate (Bob) back to client
+    // 3) receive CRL (CRL ...) and save it
+    std::string next_line = recv_line(client_sock);
+    if (!next_line.empty()) {
+        // Expect client's certificate first
+        bool cert_saved = false;
+        if (next_line.rfind("CERT ", 0) == 0) {
+            cert_saved = parse_and_save_file_message(next_line, "./received_certs", "CERT");
+            if (cert_saved) std::cout << "Server: client CERT saved to ./received_certs/\n";
+            else std::cerr << "Server: failed to save client CERT\n";
+        } else {
+            // Not a CERT line; keep it for later handling
+            line = next_line;
+        }
+
+        // Send server's certificate (Bob) back to the client
+        try {
+            std::string bob_path = "./certFiles/Bob.cert487";
+            if (std::filesystem::exists(bob_path) && std::filesystem::is_regular_file(bob_path)) {
+                std::string certmsg = make_file_message(bob_path, "CERT");
+                if (!certmsg.empty() && send_all(client_sock, certmsg)) {
+                    std::cout << "Server: sent certificate '" << bob_path << "' to client\n";
+                } else {
+                    std::cerr << "Server: failed to send Bob certificate\n";
+                }
+            } else {
+                std::cerr << "Server: Bob certificate not found at '" << bob_path << "'\n";
+            }
+        } catch (const std::exception &e) {
+            std::cerr << "Server: error sending Bob certificate: " << e.what() << "\n";
+        }
+
+        // If we already consumed a line that's not CERT, that might be the CRL or DH_INIT.
+        // If we saved a cert, read the next line which should be CRL (optional)
+        std::string crlline;
+        if (cert_saved) crlline = recv_line(client_sock);
+        else if (line.rfind("CRL ", 0) == 0) crlline = line;
+
+        if (!crlline.empty()) {
+            bool crl_saved = parse_and_save_file_message(crlline, "./received_crl", "CRL");
+            if (crl_saved) {
+                std::cout << "Server: CRL saved to ./received_crl/ by helper\n";
+                line.clear();
+            } else {
+                // If it wasn't a CRL, treat it as the next message (e.g., DH_INIT)
+                if (crlline.rfind("CRL ", 0) != 0) {
+                    line = crlline;
+                } else {
+                    std::cerr << "Server: received CRL line but failed to save it\n";
+                }
+            }
+        }
+    }
 
     // Now expect signed Diffie-Hellman init from client: "DH_INIT <p> <g> <A> <sig>\n"
     line = recv_line(client_sock);
