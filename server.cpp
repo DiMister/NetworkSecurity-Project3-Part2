@@ -75,43 +75,8 @@ int main(int argc, char* argv[]) {
     inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
     std::cout << "Accepted connection from " << client_ip << ":" << ntohs(client_addr.sin_port) << "\n";
 
-    // Expect client's RSA public key: "RSA_PUB <n> <e>\n"
-    std::string line = recv_line(client_sock);
-    if (line.rfind("RSA_PUB ", 0) != 0) {
-        std::cerr << "Server: expected RSA_PUB, got '" << line << "'\n";
-        close(client_sock);
-        close(listen_sock);
-        return 1;
-    }
-
-    unsigned long long client_n_tmp = 0ull;
-    uint32_t client_e = 0u;
-    {
-        std::istringstream iss(line.substr(8));
-        iss >> client_n_tmp >> client_e;
-    }
-    uint32_t client_n = static_cast<uint32_t>(client_n_tmp);
-    std::cout << "Server: received client RSA public n=" << client_n << " e=" << client_e << "\n";
-
-    if (client_n == 0u) {
-        std::cerr << "Server: invalid client modulus\n";
-        close(client_sock);
-        close(listen_sock);
-        return 1;
-    }
-
     // Server's RSA keys (n,e,d)
     int n = 836287813, e = 663980159, d = 707411039;
-
-    // Send server's RSA pub to client
-    std::string server_pub = "RSA_PUB " + std::to_string(n) + " " + std::to_string(e) + "\n";
-    if (!send_all(client_sock, server_pub)) {
-        std::perror("send");
-        close(client_sock);
-        close(listen_sock);
-        return 1;
-    }
-    std::cout << "Server: sent RSA_PUB " << n << " " << e << "\n";
 
     // After sending RSA pubkey, perform certificate exchange:
     // 1) receive client's certificate (CERT ...) and save it
