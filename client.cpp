@@ -70,7 +70,7 @@ int main(int argc, char* argv[]) {
     int n = 769864357, e = 142112703, d = 409609311;
 
     pki487::Cert487 bob_cert;
-\    // Certificate exchange: send Alice cert to server, then receive server's cert (Bob) and save it
+    // Certificate exchange: send Alice cert to server, then receive server's cert (Bob) and save it
     try {
         // send Alice cert if present
         std::string alice_path = "./certFiles/Alice.cert487";
