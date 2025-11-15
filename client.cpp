@@ -32,7 +32,7 @@ int main(int argc, char* argv[]) {
     namespace fs = std::filesystem;
     pki487::CertGraph certGraph;
     int certs_added = 0;
-    string cert_path = "./certFiles";
+    std::string cert_path = "./certFiles";
     if (fs::exists(cert_path) && fs::is_directory(cert_path)) {
         for (auto &entry : fs::directory_iterator(cert_path)) {
             if (!entry.is_regular_file()) continue;
@@ -80,9 +80,51 @@ int main(int argc, char* argv[]) {
     // Send our public key to server: RSA_PUB <n> <e>\n
     std::string publine = "RSA_PUB " + std::to_string(n) + " " + std::to_string(e) + "\n";
     if (!send_all(sock, publine)) { perror("send"); close(sock); return 1; }
+    // Receive server's RSA pub: "RSA_PUB <n> <e>\n"
+    std::string srv_line = recv_line(sock);
+    if (srv_line.rfind("RSA_PUB ", 0) != 0) {
+        std::cerr << "Expected RSA_PUB from server, got '" << srv_line << "'\n";
+        close(sock);
+        return 1;
+    }
+    unsigned long long server_n_tmp = 0ull;
+    uint32_t server_e = 0u;
+    {
+        std::istringstream iss(srv_line.substr(8));
+        iss >> server_n_tmp >> server_e;
+    }
+    uint32_t server_n = static_cast<uint32_t>(server_n_tmp);
+    std::cout << "Client: received server RSA pub n=" << server_n << " e=" << server_e << std::endl;
 
-    // After exchanging RSA pubkeys, send a CRL file (hex-encoded) if present
-    // Use helper make_file_message to build the message from a file path
+    // Certificate exchange: send Alice cert to server, then receive server's cert (Bob) and save it
+    try {
+        // send Alice cert if present
+        std::string alice_path = "./certFiles/Alice.cert487";
+        if (std::filesystem::exists(alice_path) && std::filesystem::is_regular_file(alice_path)) {
+            std::string certmsg = make_file_message(alice_path, "CERT");
+            if (!certmsg.empty() && send_all(sock, certmsg)) {
+                std::cout << "Client: sent certificate '" << alice_path << "' to server\n";
+            } else {
+                std::cerr << "Client: failed to send Alice certificate\n";
+            }
+        } else {
+            std::cerr << "Client: Alice certificate not found at '" << alice_path << "'\n";
+        }
+
+        // receive server's certificate
+        std::string cert_line = recv_line(sock);
+        if (!cert_line.empty()) {
+            bool ok = parse_and_save_file_message(cert_line, "./received_certs", "CERT");
+            if (ok) std::cout << "Client: received and saved server certificate to ./received_certs/\n";
+            else std::cerr << "Client: did not receive a valid CERT line from server\n";
+        } else {
+            std::cerr << "Client: no certificate line received from server\n";
+        }
+    } catch (const std::exception &e) {
+        std::cerr << "Client: certificate exchange error: " << e.what() << "\n";
+    }
+
+    // After certificate exchange, send a CRL file (hex-encoded) if present
     try {
         namespace fs = std::filesystem;
         if (fs::exists("./crlFIles") && fs::is_directory("./crlFIles")) {
@@ -101,22 +143,6 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception &e) {
         std::cerr << "Client: error sending CRL file: " << e.what() << "\n";
     }
-
-    // Receive server's RSA pub: "RSA_PUB <n> <e>\n"
-    std::string srv_line = recv_line(sock);
-    if (srv_line.rfind("RSA_PUB ", 0) != 0) {
-        std::cerr << "Expected RSA_PUB from server, got '" << srv_line << "'\n";
-        close(sock);
-        return 1;
-    }
-    unsigned long long server_n_tmp = 0ull;
-    uint32_t server_e = 0u;
-    {
-        std::istringstream iss(srv_line.substr(8));
-        iss >> server_n_tmp >> server_e;
-    }
-    uint32_t server_n = static_cast<uint32_t>(server_n_tmp);
-    std::cout << "Client: received server RSA pub n=" << server_n << " e=" << server_e << std::endl;
 
     // Now send signed Diffie-Hellman params: choose prime p and generator g and our public A
     int dh_p = 0, dh_g = -1;

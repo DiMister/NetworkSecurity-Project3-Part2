@@ -67,7 +67,7 @@ bool parse_and_save_file_message(const std::string &line, const std::string &out
         auto bytes = pki487::hex_decode(hex);
 
         std::filesystem::create_directories(out_dir);
-        std::string outpath = std::filesystem::path(out_dir) / fname;
+        std::string outpath = (std::filesystem::path(out_dir) / fname).string();
         std::ofstream out(outpath, std::ios::binary);
         if (!out) return false;
         out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
