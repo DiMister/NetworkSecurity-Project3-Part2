@@ -9,7 +9,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include "./Helpers/net_utils.h"
+#include "./Helpers/net_utils.hpp"
 #include "./Helpers/FastModExp.h"
 #include "./Helpers/MathUtils.h"
 #include "./Helpers/DiffeHellman.h"
@@ -18,6 +18,7 @@
 #include <thread>
 #include <sstream>
 #include <iomanip>
+// net_utils now provides parsing/saving helpers for received file messages
 
 int main(int argc, char* argv[]) {
     uint16_t port = 8421;
@@ -105,6 +106,22 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     std::cout << "Server: sent RSA_PUB " << n << " " << e << "\n";
+
+    // After sending RSA pubkey, optionally receive a file-message (e.g. CRL) and save it
+    std::string crlline = recv_line(client_sock);
+    if (!crlline.empty()) {
+        bool saved = parse_and_save_file_message(crlline, "./received_crl", "CRL");
+        if (saved) {
+            std::cout << "Server: CRL saved to ./received_crl/ by helper\n";
+        } else {
+            // If it's not a CRL line, keep it for the next processing step
+            if (crlline.rfind("CRL ", 0) != 0) {
+                line = crlline; // reuse as the next expected message
+            } else {
+                std::cerr << "Server: received CRL line but failed to save it\n";
+            }
+        }
+    }
 
     // Now expect signed Diffie-Hellman init from client: "DH_INIT <p> <g> <A> <sig>\n"
     line = recv_line(client_sock);

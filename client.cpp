@@ -80,6 +80,27 @@ int main(int argc, char* argv[]) {
     std::string publine = "RSA_PUB " + std::to_string(n) + " " + std::to_string(e) + "\n";
     if (!send_all(sock, publine)) { perror("send"); close(sock); return 1; }
 
+    // After exchanging RSA pubkeys, send a CRL file (hex-encoded) if present
+    // Use helper make_file_message to build the message from a file path
+    try {
+        namespace fs = std::filesystem;
+        if (fs::exists("./crlFIles") && fs::is_directory("./crlFIles")) {
+            for (auto &entry : fs::directory_iterator("./crlFIles")) {
+                if (!entry.is_regular_file()) continue;
+                std::string msg = make_file_message(entry.path().string(), "CRL");
+                if (msg.empty()) continue;
+                if (send_all(sock, msg)) {
+                    std::cout << "Client: sent CRL file '" << entry.path().filename().string() << "' (message length=" << msg.size() << ") to server\n";
+                } else {
+                    std::cerr << "Client: failed to send CRL file\n";
+                }
+                break; // send only one file
+            }
+        }
+    } catch (const std::exception &e) {
+        std::cerr << "Client: error sending CRL file: " << e.what() << "\n";
+    }
+
     // Receive server's RSA pub: "RSA_PUB <n> <e>\n"
     std::string srv_line = recv_line(sock);
     if (srv_line.rfind("RSA_PUB ", 0) != 0) {
