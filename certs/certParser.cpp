@@ -35,8 +35,8 @@ void CertGraph::build_edges() {
         _subject_index[n.subject].push_back(serial);
     }
 
-    // Clear children lists
-    for (auto &kv : _nodes) kv.second.children.clear();
+    // Clear children and parents lists
+    for (auto &kv : _nodes) { kv.second.children.clear(); kv.second.parents.clear(); }
 
     // For each certificate (child candidate), find issuer matching subject entries
     for (const auto& kv : _nodes) {
@@ -51,6 +51,9 @@ void CertGraph::build_edges() {
             auto itnode = _nodes.find(issuer_serial);
             if (itnode != _nodes.end()) {
                 itnode->second.children.push_back(child_serial);
+                // record reverse link: child -> issuer (parent)
+                auto itchild = _nodes.find(child_serial);
+                if (itchild != _nodes.end()) itchild->second.parents.push_back(issuer_serial);
             }
         }
     }
@@ -87,12 +90,13 @@ static std::optional<std::vector<int>> dfs_impl(const std::unordered_map<int, Ce
         auto it = nodes.find(cur);
         if (it == nodes.end()) continue; // defensive: should not happen
 
-        // Iterate children (neighbors). Using the order as stored; LIFO gives DFS behavior.
-        for (int child : it->second.children) {
-            if (visited.find(child) != visited.end()) continue;
-            visited.insert(child);
-            parent[child] = cur;
-            if (child == target) {
+        // Iterate neighbors (children and parents). Using the order as stored; LIFO gives DFS behavior.
+        // First visit children (certs this node issued)
+        for (int neighbor : it->second.children) {
+            if (visited.find(neighbor) != visited.end()) continue;
+            visited.insert(neighbor);
+            parent[neighbor] = cur;
+            if (neighbor == target) {
                 // Reconstruct path from start -> ... -> target
                 std::vector<int> path;
                 int curp = target;
@@ -104,7 +108,26 @@ static std::optional<std::vector<int>> dfs_impl(const std::unordered_map<int, Ce
                 std::reverse(path.begin(), path.end());
                 return path;
             }
-            stack.push_back(child);
+            stack.push_back(neighbor);
+        }
+
+        // Then visit parents (issuers of this cert) so we can walk upward as well
+        for (int neighbor : it->second.parents) {
+            if (visited.find(neighbor) != visited.end()) continue;
+            visited.insert(neighbor);
+            parent[neighbor] = cur;
+            if (neighbor == target) {
+                std::vector<int> path;
+                int curp = target;
+                while (true) {
+                    path.push_back(curp);
+                    if (curp == start) break;
+                    curp = parent[curp];
+                }
+                std::reverse(path.begin(), path.end());
+                return path;
+            }
+            stack.push_back(neighbor);
         }
     }
 

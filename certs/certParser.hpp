@@ -17,6 +17,7 @@ struct CertNode {
 	std::string issuer;
 	Cert487 cert; // full parsed certificate
 	std::vector<int> children; // serials of certificates this node issues (issuer -> subject)
+	std::vector<int> parents;  // serials of certificates that issued this cert (subject -> issuer)
 };
 
 // Graph of certificates with helper methods to build from files and run DFS.
