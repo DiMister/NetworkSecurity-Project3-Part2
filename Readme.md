@@ -1,9 +1,18 @@
+# Network Security Project 3
+
+## compile in wsl
 g++ -std=c++17 client.cpp Helpers/*.cpp certs/*.cpp -pthread -o client
 g++ -std=c++17 server.cpp Helpers/*.cpp certs/*.cpp -pthread -o server
 
+## compile on mac
 clang++ -std=c++17 client.cpp Helpers/*.cpp certs/*.cpp -pthread -O2 -o client
 clang++ -std=c++17 server.cpp Helpers/*.cpp certs/*.cpp -pthread -O2 -o server
 
+## run
+./server [port]
+./client [ip_add] [port]
+
+## Constant RSA Keys
 // alice
 -----BEGIN RSA PUBLIC KEY-----
 N: 769864357
