@@ -29,6 +29,7 @@ vector<int> MathUtils::loadPrimes(const string &path) const {
     return primes;
 }
 
+// Asked chat-gpt to help with random selection from a vector
 int MathUtils::pickRandomFrom(const vector<int>& v, int minInclusive, int maxInclusive) const {
     if (v.empty()) return -1;
     // Collect candidates within range
@@ -72,7 +73,7 @@ uint32_t MathUtils::extendedEuclidean(uint32_t publicKey, uint32_t totientN) con
         tie(r, newr) = make_pair(newr, r - quotient * newr);
     }
 
-    if (r > 1) throw std::invalid_argument("Not invertible"); // Not invertible
+    if (r > 1) throw std::invalid_argument("Not invertible");
     if (t < 0) t += totientN;
     return static_cast<uint32_t>(t);
 }

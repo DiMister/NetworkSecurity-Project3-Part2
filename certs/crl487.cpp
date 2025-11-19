@@ -13,6 +13,7 @@ static std::string field(const std::string& k, const std::string& v) {
     return k + ": " + v + "\n";
 }
 
+// ask chat-gpt for a function to parse and read in a CRL from text
 std::string Crl487::serialize_tbs() const {
     std::ostringstream ss;
     ss << "-----BEGIN CRL487-----\n";

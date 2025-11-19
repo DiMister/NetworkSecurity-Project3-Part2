@@ -26,14 +26,28 @@ int main(int argc, char* argv[]) {
     if (argc >= 2) port = static_cast<uint16_t>(std::stoi(argv[1]));
 
     pki487::CertGraph certGraph;
-    certGraph.add_cert_from_file("./certFiles/Zach.cert487");
-    certGraph.add_cert_from_file("./certFiles/Bob.cert487");
-    certGraph.add_cert_from_file("./certFiles/Wurth.cert487");
 
     int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_sock == -1) {
         std::perror("socket");
         return 1;
+    }
+
+    // Send server's certificate (Bob) back to the client (unchanged behavior)
+    try {
+        std::string bob_path = "./certFiles/Bob.cert487";
+        if (std::filesystem::exists(bob_path) && std::filesystem::is_regular_file(bob_path)) {
+            std::string certmsg = make_file_message(bob_path, "CERT");
+            if (!certmsg.empty() && send_all(client_sock, certmsg)) {
+                std::cout << "Server: sent certificate '" << bob_path << "' to client\n";
+            } else {
+                std::cerr << "Server: failed to send Bob certificate\n";
+            }
+        } else {
+            std::cerr << "Server: Bob certificate not found at '" << bob_path << "'\n";
+        }
+    } catch (const std::exception &e) {
+        std::cerr << "Server: error sending Bob certificate: " << e.what() << "\n";
     }
 
     int opt = 1;
@@ -78,94 +92,51 @@ int main(int argc, char* argv[]) {
     // Server's RSA keys (n,e,d)
     int n = 836287813, e = 663980159, d = 707411039;
 
-    // After sending RSA pubkey, perform certificate exchange:
-    // 1) receive client's certificate (CERT ...) and save it
-    // 2) send server's certificate (Bob) back to client
-    // 3) receive CRL (CRL ...) and save it
-    pki487::Cert487 alice_cert;
-    std::string next_line = recv_line(client_sock);
+    // After sending RSA pubkey, perform certificate exchange: receive a whole chain of CERT <file> messages
+    // The client will send multiple "CERT <filename> <hex>\n" messages and then a single "CERT_DONE\n" sentinel.
     std::string line;
-    if (!next_line.empty()) {
-        // Expect client's certificate first
-        bool cert_saved = false;
-        if (next_line.rfind("CERT ", 0) == 0) {
-            cert_saved = parse_and_save_file_message(next_line, "./received_certs", "CERT");
-            auto added = certGraph.add_certs_from_directory("./received_certs");
-            alice_cert = pki487::Cert487::from_file("./received_certs/Alice.cert487");
+    bool got_any_cert = false;
+    // Ensure received_certs directory exists
+    try {
+        std::filesystem::create_directories("./received_certs");
+    } catch (...) {}
 
-            // Attempt to find and verify a path from Alice to the received Bob cert.
-            if (added.has_value()) {
-                if (*added == 0) {
-                    std::cout << "Server: No new certificates were added from server to attempt path verification\n";
-                } else {
-                    const std::string &subject = alice_cert.subject;
-                    auto res = certGraph.find_path_by_subjects(std::string("Bob"), subject);
-                    if (!res.has_value()) {
-                        std::cout << "Server: Missing nodes for path check (Bob or " << subject << ")\n";
-                    } else if (res->first.empty()) {
-                        std::cout << "Server: No verified path found from Bob to '" << subject << "'\n";
-                    } else {
-                        std::cout << "Server: Found path from Bob to '" << subject << "':\n";
-                        std::cout << "  Path (serial:subject[trust]): ";
-                        for (int s : res->first) {
-                            auto itn = certGraph.nodes().find(s);
-                            if (itn != certGraph.nodes().end()) {
-                                std::cout << s << ":" << itn->second.subject << "[" << itn->second.cert.trust_level << "] ";
-                            } else {
-                                std::cout << s << " ";
-                            }
-                        }
-                        std::cout << "\n  Minimum trust on this path: " << res->second << "\n";
-                    }
-                }
-            } else {
-                std::cout << "No new certificates were added from server to attempt path verification\n";
-            }
+    while (true) {
+        std::string in = recv_line(client_sock);
+        if (in.empty()) {
+            // connection closed or error
+            break;
         }
-
-        // Send server's certificate (Bob) back to the client
-        try {
-            std::string bob_path = "./certFiles/Bob.cert487";
-            if (std::filesystem::exists(bob_path) && std::filesystem::is_regular_file(bob_path)) {
-                std::string certmsg = make_file_message(bob_path, "CERT");
-                if (!certmsg.empty() && send_all(client_sock, certmsg)) {
-                    std::cout << "Server: sent certificate '" << bob_path << "' to client\n";
-                } else {
-                    std::cerr << "Server: failed to send Bob certificate\n";
-                }
-            } else {
-                std::cerr << "Server: Bob certificate not found at '" << bob_path << "'\n";
-            }
-        } catch (const std::exception &e) {
-            std::cerr << "Server: error sending Bob certificate: " << e.what() << "\n";
+        if (in == "CERT_DONE") {
+            // end of chain
+            break;
         }
-
-        // If we already consumed a line that's not CERT, that might be the CRL or DH_INIT.
-        // If we saved a cert, read the next line which should be CRL (optional)
-        std::string crlline;
-        if (cert_saved) crlline = recv_line(client_sock);
-        else if (line.rfind("CRL ", 0) == 0) crlline = line;
-
-        if (!crlline.empty()) {
-            bool crl_saved = parse_and_save_file_message(crlline, "./received_crl", "CRL");
-            if (crl_saved) {
-                std::cout << "Server: CRL saved to ./received_crl/ by helper\n";
-                line.clear();
-            } else {
-                // If it wasn't a CRL, treat it as the next message (e.g., DH_INIT)
-                if (crlline.rfind("CRL ", 0) != 0) {
-                    line = crlline;
-                } else {
-                    std::cerr << "Server: received CRL line but failed to save it\n";
-                }
-            }
+        if (in.rfind("CERT ", 0) == 0) {
+            bool saved = parse_and_save_file_message(in, "./received_certs", "CERT");
+            if (saved) got_any_cert = true;
+            // continue reading next cert
+            continue;
         }
-    } 
-    else {
-        // Not a CERT line; keep it for later handling
-        line = next_line;
+        // Not a CERT line: treat as next protocol message (e.g., CRL or DH_INIT)
+        line = in;
+        break;
     }
 
+    // Build parse tree (graph) only from the received certs
+    auto added = certGraph.add_certs_from_directory("./received_certs");
+
+    // Try to locate Alice's cert among the received files/graph so we can get client's pubkey
+    pki487::Cert487 alice_cert;
+    bool have_alice = false;
+    try {
+        std::string alice_path = "./received_certs/Alice.cert487";
+        if (std::filesystem::exists(alice_path) && std::filesystem::is_regular_file(alice_path)) {
+            alice_cert = pki487::Cert487::from_file(alice_path);
+            have_alice = true;
+        }
+    } catch (...) { 
+        std::cerr << "Server: failed to load Alice certificate from received certs\n";
+    }
 
     auto client_n = alice_cert.subject_pubkey_pem.n;
     auto client_e = alice_cert.subject_pubkey_pem.exponent;
