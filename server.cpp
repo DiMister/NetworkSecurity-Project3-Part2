@@ -19,6 +19,7 @@
 #include <thread>
 #include <sstream>
 #include <iomanip>
+#include <fstream>
 #include <filesystem>
 
 int main(int argc, char* argv[]) {
@@ -96,8 +97,7 @@ int main(int argc, char* argv[]) {
         std::filesystem::create_directories("./received_crl");
     } catch (...) {}
 
-    // first receive CRL(s) from client, parse revoked serials, ack back
-    std::unordered_set<int> revoked_serials;
+    // first receive CRL(s) from client, ack back
     while (true) {
         std::string in = recv_line(client_sock);
         if (in.empty()) {
@@ -132,14 +132,6 @@ int main(int argc, char* argv[]) {
             } catch (const std::exception &ex) {
                 std::cerr << "Server: failed to save CRL file: " << ex.what() << "\n";
             }
-            
-            // parse CRL bytes (assume ASCII list of revoked serial ints)
-            std::string s(bytes.begin(), bytes.end());
-            std::istringstream siss(s);
-            int serial;
-            while (siss >> serial) {
-                revoked_serials.insert(serial);
-            }
             continue;
         }
         // unexpected non-CRL line -> protocol error
@@ -147,24 +139,12 @@ int main(int argc, char* argv[]) {
         // for robustness, continue reading until CRL_DONE or close
     }
 
-    // send CRL ack
-    if (!revoked_serials.empty()) {
-        if (!send_all(client_sock, std::string("CRL_OK\n"))) {
-            std::cerr << "Server: failed to send CRL_OK\n";
-            close(client_sock);
-            close(listen_sock);
-            return 1;
-        }
-        std::cout << "Server: parsed CRL, revoked count=" << revoked_serials.size() << "\n";
-    } else {
-        // no revoked entries but still ACK
-        if (!send_all(client_sock, std::string("CRL_OK\n"))) {
-            std::cerr << "Server: failed to send CRL_OK\n";
-            close(client_sock);
-            close(listen_sock);
-            return 1;
-        }
-        std::cout << "Server: no revoked entries found in CRL(s)\n";
+    // send CRL ack 
+    if (!send_all(client_sock, std::string("CRL_OK\n"))) {
+        std::cerr << "Server: failed to send CRL_OK\n";
+        close(client_sock);
+        close(listen_sock);
+        return 1;
     }
 
     // After CRL ack, expect certificate chain from client: multiple "CERT <file> <hex>\n" then "CERT_DONE\n"
@@ -192,6 +172,32 @@ int main(int argc, char* argv[]) {
 
     // Build parse tree (graph) only from the received certs
     auto added = certGraph.add_certs_from_directory("./received_certs");
+    certGraph.build_edges();
+
+    // Find certification path from Bob -> Alice (if any)
+    auto pathRes = certGraph.find_path_by_subjects("Bob", "Alice");
+    if (!pathRes.has_value()) {
+        std::cerr << "Server: missing certificate(s) for Bob or Alice; stopping chain\n";
+        close(client_sock);
+        close(listen_sock);
+        return 1;
+    }
+    // value present: empty vector means both endpoints present but no path found
+    if (pathRes->first.empty()) {
+        std::cerr << "Server: no valid certification path found from 'Bob' to 'Alice'; stopping chain\n";
+        // Print available subjects for debugging
+        std::cerr << "Server: available certificates:" << std::endl;
+        for (const auto &kv : certGraph.nodes()) {
+            std::cerr << "  serial=" << kv.first << " subject='" << kv.second.subject << "' issuer='" << kv.second.issuer << "' trust=" << kv.second.cert.trust_level << "\n";
+        }
+        close(client_sock);
+        close(listen_sock);
+        return 1;
+    }
+    // Otherwise we have a valid path; print it
+    std::cout << "Server: found certification path (serials):";
+    for (int s : pathRes->first) std::cout << " " << s;
+    std::cout << "  min_trust=" << pathRes->second << "\n";
 
     // If chain OK, send Bob's certificate back to the client
     try {
@@ -223,26 +229,9 @@ int main(int argc, char* argv[]) {
 
     auto client_n = alice_cert.subject_pubkey_pem.n;
     auto client_e = alice_cert.subject_pubkey_pem.exponent;
-
-    // Send server's certificate (Bob) back to the client after we've processed the received chain.
-    try {
-        std::string bob_path = "./certFiles/Bob.cert487";
-        if (std::filesystem::exists(bob_path) && std::filesystem::is_regular_file(bob_path)) {
-            std::string certmsg = make_file_message(bob_path, "CERT");
-            if (!certmsg.empty() && send_all(client_sock, certmsg)) {
-                std::cout << "Server: sent certificate '" << bob_path << "' to client\n";
-            } else {
-                std::cerr << "Server: failed to send Bob certificate\n";
-            }
-        } else {
-            std::cerr << "Server: Bob certificate not found at '" << bob_path << "'\n";
-        }
-    } catch (const std::exception &e) {
-        std::cerr << "Server: error sending Bob certificate: " << e.what() << "\n";
-    }
-
+    
     // Now expect signed Diffie-Hellman init from client: "DH_INIT <p> <g> <A> <sig>\n"
-    line = recv_line(client_sock);
+    std::string line = recv_line(client_sock);
     if (line.rfind("DH_INIT ", 0) != 0) {
         std::cerr << "Server: expected DH_INIT, got '" << line << "'\n";
         close(client_sock);

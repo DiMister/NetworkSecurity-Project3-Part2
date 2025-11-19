@@ -184,6 +184,7 @@ int main(int argc, char* argv[]) {
                     std::string bob_path = "./received_certs/Bob.cert487";
                     if (std::filesystem::exists(bob_path) && std::filesystem::is_regular_file(bob_path)) {
                         bob_cert = pki487::Cert487::from_file(bob_path);
+                        certGraph.add_cert_from_file(bob_path);
                         std::cout << "Client: loaded Bob certificate\n";
                     }
                 } catch (...) {
@@ -198,6 +199,31 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception &e) {
         std::cerr << "Client: certificate/CRL exchange error: " << e.what() << "\n";
     }
+
+    certGraph.build_edges();
+
+    // Find certification path from Bob -> Alice (if any)
+    auto pathRes = certGraph.find_path_by_subjects("Bob", "Alice");
+    if (!pathRes.has_value()) {
+        std::cerr << "Client: missing certificate(s) for Bob or Alice; stopping chain\n";
+        close(sock);
+        return 1;
+    }
+    // value present: empty vector means both endpoints present but no path found
+    if (pathRes->first.empty()) {
+        std::cerr << "Client: no valid certification path found from 'Bob' to 'Alice'; stopping chain\n";
+        // Print available subjects for debugging
+        std::cerr << "Client: available certificates:" << std::endl;
+        for (const auto &kv : certGraph.nodes()) {
+            std::cerr << "  serial=" << kv.first << " subject='" << kv.second.subject << "' issuer='" << kv.second.issuer << "' trust=" << kv.second.cert.trust_level << "\n";
+        }
+        close(sock);
+        return 1;
+    }
+    // Otherwise we have a valid path; print it
+    std::cout << "Client: found certification path (serials):";
+    for (int s : pathRes->first) std::cout << " " << s;
+    std::cout << "  min_trust=" << pathRes->second << "\n";
 
     auto server_n = bob_cert.subject_pubkey_pem.n;
     auto server_e = bob_cert.subject_pubkey_pem.exponent;
