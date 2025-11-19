@@ -10,8 +10,31 @@
 #include <climits>
 #include <algorithm>
 #include <ctime>
+#include <cctype>
 
 namespace pki487 {
+
+int CertGraph::get_pki_time(const std::string &path) const {
+    try {
+        std::ifstream in(path);
+        if (!in) return static_cast<int>(std::time(nullptr));
+        std::string line;
+        if (!std::getline(in, line)) return static_cast<int>(std::time(nullptr));
+        // trim
+        size_t a = 0; while (a < line.size() && std::isspace(static_cast<unsigned char>(line[a]))) ++a;
+        size_t b = line.size(); while (b > a && std::isspace(static_cast<unsigned char>(line[b-1]))) --b;
+        if (b <= a) return static_cast<int>(std::time(nullptr));
+        std::string t = line.substr(a, b - a);
+        try {
+            int v = std::stoll(t);
+            return v;
+        } catch (...) {
+            return static_cast<int>(std::time(nullptr));
+        }
+    } catch (...) {
+        return static_cast<int>(std::time(nullptr));
+    }
+}
 
 // ask chat-gpt for a function to parse and read in a certificate from a file and add to graph
 std::optional<std::error_code> CertGraph::add_cert_from_text(const std::string& text) {
@@ -30,6 +53,12 @@ std::optional<std::error_code> CertGraph::add_cert_from_text(const std::string& 
                 issuer_pub = kv.second.cert.subject_pubkey_pem;
                 break;
             }
+        }
+        // Check certificate validity period
+        int now = get_pki_time();
+        if (c.not_before > now || c.not_after < now) {
+            std::cerr << "CertGraph::add_cert_from_text: certificate serial " << c.serial << " is not valid at current time\n";
+            return std::make_error_code(std::errc::permission_denied);
         }
         // Fallback to compile-time known public keys
         if (!issuer_pub) {
@@ -80,6 +109,7 @@ static bool verify_crl_signature(const std::unordered_map<int, CertNode>& nodes,
         auto pk = pki487::lookup_public_key(crl.issuer);
         if (pk.has_value()) issuer_pub = pki487::keypair{pk->n, pk->e};
     }
+
     if (!issuer_pub) return false;
     auto tbs = crl.serialize_tbs();
     auto sig = crl.signature_bytes();
@@ -91,7 +121,7 @@ bool CertGraph::is_cert_revoked_by_received_crls(int serial, const std::string& 
     if (!fs::exists(crl_dir) || !fs::is_directory(crl_dir)) return false;
     bool any_verified = false;
     bool revoked_found = false;
-    std::time_t now = std::time(nullptr);
+    // Use PKI time override if available in pki_time.txt, otherwise system time
     for (auto &entry : fs::directory_iterator(crl_dir)) {
         if (!entry.is_regular_file()) continue;
         // try to read file and parse CRL
@@ -106,6 +136,7 @@ bool CertGraph::is_cert_revoked_by_received_crls(int serial, const std::string& 
             pki487::Crl487 crl = pki487::Crl487::parse(txt);
             // verify signature and time validity
             if (!verify_crl_signature(_nodes, crl)) continue;
+            int now = get_pki_time();
             if (!pki487::crl_time_valid(crl, static_cast<long long>(now))) continue;
             any_verified = true;
             // check if serial is revoked (CRL stores long long)

@@ -176,11 +176,6 @@ int main(int argc, char* argv[]) {
         // receive server's certificate (Bob) after server validates the received chain
         std::string cert_line = recv_line(sock);
         if (!cert_line.empty()) {
-            if (cert_line == "CERT_CHAIN_REJECTED") {
-                std::cerr << "Client: server rejected certificate chain\n";
-                close(sock);
-                return 1;
-            }
             // Expect a CERT <filename> <hex> line containing Bob's cert
             bool saved = parse_and_save_file_message(cert_line, "./received_certs", "CERT");
             if (saved) {

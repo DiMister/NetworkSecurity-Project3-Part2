@@ -121,7 +121,7 @@ int main(int argc, char* argv[]) {
             // decode hex -> bytes
             std::vector<unsigned char> bytes;
             bytes = hex_to_bytes(hexdata);
-            
+
             // save raw CRL file
             try {
                 std::filesystem::path outp = std::filesystem::path("./received_crl") / filename;
@@ -132,6 +132,7 @@ int main(int argc, char* argv[]) {
             } catch (const std::exception &ex) {
                 std::cerr << "Server: failed to save CRL file: " << ex.what() << "\n";
             }
+            
             // parse CRL bytes (assume ASCII list of revoked serial ints)
             std::string s(bytes.begin(), bytes.end());
             std::istringstream siss(s);
@@ -189,32 +190,8 @@ int main(int argc, char* argv[]) {
         break;
     }
 
-    // After receiving certs, check for any revoked certs among received cert files.
-    bool any_revoked = false;
-    try {
-        for (auto &entry : std::filesystem::directory_iterator("./received_certs")) {
-            if (!entry.is_regular_file()) continue;
-            if (entry.path().extension() != ".cert487") continue;
-            try {
-                auto cert = pki487::Cert487::from_file(entry.path().string());
-                if (revoked_serials.find(cert.serial) != revoked_serials.end()) {
-                    std::cerr << "Server: received certificate '" << entry.path().filename().string() << "' is revoked (serial=" << cert.serial << ")\n";
-                    any_revoked = true;
-                }
-            } catch (...) {
-                std::cerr << "Server: failed to parse received cert '" << entry.path().filename().string() << "'\n";
-            }
-        }
-    } catch (...) {}
-
-    if (any_revoked) {
-        // notify client and abort
-        send_all(client_sock, std::string("CERT_CHAIN_REJECTED\n"));
-        std::cerr << "Server: rejecting certificate chain due to CRL\n";
-        close(client_sock);
-        close(listen_sock);
-        return 1;
-    }
+    // Build parse tree (graph) only from the received certs
+    auto added = certGraph.add_certs_from_directory("./received_certs");
 
     // If chain OK, send Bob's certificate back to the client
     try {
@@ -232,9 +209,6 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception &e) {
         std::cerr << "Server: error sending Bob certificate: " << e.what() << "\n";
     }
-
-    // Build parse tree (graph) only from the received certs
-    auto added = certGraph.add_certs_from_directory("./received_certs");
 
     // Try to locate Alice's cert among the received files/graph so we can get client's pubkey
     pki487::Cert487 alice_cert;

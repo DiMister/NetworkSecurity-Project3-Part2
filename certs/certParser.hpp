@@ -64,7 +64,9 @@ public:
 private:
 	std::unordered_map<int, CertNode> _nodes; // serial -> node
 	std::unordered_map<std::string, std::vector<int>> _subject_index; // subject -> serials
-	// no stored global min trust; min trust is computed for each found path
+	// Read PKI time override from a file. 
+	int get_pki_time(const std::string &path = "pki_time.txt") const;
 };
 
-} // namespace pki487
+}
+
