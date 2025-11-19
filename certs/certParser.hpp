@@ -53,6 +53,14 @@ public:
 	// Access to nodes map for inspection
 	const std::unordered_map<int, CertNode>& nodes() const { return _nodes; }
 
+	// Check all CRL files in `crl_dir` (default ./received_crl). For each CRL:
+	//  - parse the CRL
+	//  - verify the CRL signature using the issuer's public key (from received certs or known public keys)
+	//  - check CRL validity time
+	// Scan verified CRLs in `crl_dir` and return true if any verified CRL lists `serial` as revoked.
+	// Returns false if no verified CRL lists the serial (including the case where no CRLs could be verified).
+	bool is_cert_revoked_by_received_crls(int serial, const std::string& crl_dir = "./received_crl") const;
+
 private:
 	std::unordered_map<int, CertNode> _nodes; // serial -> node
 	std::unordered_map<std::string, std::vector<int>> _subject_index; // subject -> serials

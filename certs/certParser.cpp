@@ -1,12 +1,15 @@
 #include "certParser.hpp"
 #include "io.hpp"
 #include "../publicKeys.hpp"
+#include "crl487.hpp"
+#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <filesystem>
 #include <system_error>
 #include <climits>
 #include <algorithm>
+#include <ctime>
 
 namespace pki487 {
 
@@ -34,14 +37,21 @@ std::optional<std::error_code> CertGraph::add_cert_from_text(const std::string& 
             if (pk.has_value()) issuer_pub = pki487::keypair{pk->n, pk->e};
         }
         if (!issuer_pub) {
-            // Can't verify without issuer public key
+            std::cerr << "CertGraph::add_cert_from_text: issuer public key for '" << c.issuer << "' not found; rejecting cert serial " << c.serial << "\n";
             return std::make_error_code(std::errc::permission_denied);
         }
         // Verify signature using RSA helper
         if (!pki487::Rsa::verify_message(tbs, *issuer_pub, sig_bytes)) {
+            std::cerr << "CertGraph::add_cert_from_text: signature verification failed for cert serial " << c.serial << " (issuer='" << c.issuer << "')\n";
             return std::make_error_code(std::errc::invalid_argument);
         }
-        printf("CertGraph::add_cert_from_text: signature verified for cert serial %d\n", c.serial);
+
+        // Check received CRLs (verify CRLs first) to ensure this certificate is not revoked.
+        if (is_cert_revoked_by_received_crls(c.serial, "./received_crl")) {
+            std::cerr << "CertGraph::add_cert_from_text: certificate serial " << c.serial << " revoked by verified CRL\n";
+            return std::make_error_code(std::errc::permission_denied);
+        }
+        
         CertNode node;
         node.serial = c.serial;
         node.subject = c.subject;
@@ -51,10 +61,64 @@ std::optional<std::error_code> CertGraph::add_cert_from_text(const std::string& 
         _nodes[node.serial] = node;
         // We'll repopulate entire index in build_edges to keep consistent
         return std::nullopt;
-    } catch (const std::exception& ex) {
-        printf("CertGraph::add_cert_from_text exception: %s\n", ex.what());
+    } catch (const std::exception&) {
         return std::make_error_code(std::errc::invalid_argument);
     }
+}
+
+// Verify a CRL's signature using issuer public key available from the graph or static known keys.
+static bool verify_crl_signature(const std::unordered_map<int, CertNode>& nodes, const pki487::Crl487& crl) {
+    // Find issuer public key in nodes
+    std::optional<pki487::keypair> issuer_pub;
+    for (const auto &kv : nodes) {
+        if (kv.second.subject == crl.issuer) {
+            issuer_pub = kv.second.cert.subject_pubkey_pem;
+            break;
+        }
+    }
+    if (!issuer_pub) {
+        auto pk = pki487::lookup_public_key(crl.issuer);
+        if (pk.has_value()) issuer_pub = pki487::keypair{pk->n, pk->e};
+    }
+    if (!issuer_pub) return false;
+    auto tbs = crl.serialize_tbs();
+    auto sig = crl.signature_bytes();
+    return pki487::Rsa::verify_message(tbs, *issuer_pub, sig);
+}
+
+bool CertGraph::is_cert_revoked_by_received_crls(int serial, const std::string& crl_dir) const {
+    namespace fs = std::filesystem;
+    if (!fs::exists(crl_dir) || !fs::is_directory(crl_dir)) return false;
+    bool any_verified = false;
+    bool revoked_found = false;
+    std::time_t now = std::time(nullptr);
+    for (auto &entry : fs::directory_iterator(crl_dir)) {
+        if (!entry.is_regular_file()) continue;
+        // try to read file and parse CRL
+        try {
+            std::ifstream in(entry.path(), std::ios::binary);
+            if (!in) continue;
+            std::ostringstream ss;
+            ss << in.rdbuf();
+            auto txt = ss.str();
+            // quick check
+            if (txt.find("-----BEGIN CRL487-----") == std::string::npos) continue;
+            pki487::Crl487 crl = pki487::Crl487::parse(txt);
+            // verify signature and time validity
+            if (!verify_crl_signature(_nodes, crl)) continue;
+            if (!pki487::crl_time_valid(crl, static_cast<long long>(now))) continue;
+            any_verified = true;
+            // check if serial is revoked (CRL stores long long)
+            if (pki487::crl_is_revoked(crl, static_cast<long long>(serial))) {
+                revoked_found = true;
+                break;
+            }
+        } catch (...) {
+            continue; // skip bad files
+        }
+    }
+    // If no verified CRLs were found, return false (treat as 'not revoked' by verified CRLs)
+    return revoked_found;
 }
 
 std::optional<std::error_code> CertGraph::add_cert_from_file(const std::string& filepath) {
