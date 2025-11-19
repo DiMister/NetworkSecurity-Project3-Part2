@@ -22,6 +22,21 @@
 #include <filesystem>
 
 int main(int argc, char* argv[]) {
+    // Helper: hex -> bytes (same format used by client)
+    auto hex_to_bytes = [](const std::string &hex) {
+        std::vector<unsigned char> out;
+        if (hex.size() % 2 != 0) return out;
+        for (size_t i = 0; i < hex.size(); i += 2) {
+            std::string byteStr = hex.substr(i, 2);
+            uint32_t byte;
+            std::stringstream ss;
+            ss << std::hex << byteStr;
+            ss >> byte;
+            out.push_back(static_cast<unsigned char>(byte));
+        }
+        return out;
+    };
+
     uint16_t port = 8421;
     if (argc >= 2) port = static_cast<uint16_t>(std::stoi(argv[1]));
 
@@ -31,23 +46,6 @@ int main(int argc, char* argv[]) {
     if (listen_sock == -1) {
         std::perror("socket");
         return 1;
-    }
-
-    // Send server's certificate (Bob) back to the client (unchanged behavior)
-    try {
-        std::string bob_path = "./certFiles/Bob.cert487";
-        if (std::filesystem::exists(bob_path) && std::filesystem::is_regular_file(bob_path)) {
-            std::string certmsg = make_file_message(bob_path, "CERT");
-            if (!certmsg.empty() && send_all(client_sock, certmsg)) {
-                std::cout << "Server: sent certificate '" << bob_path << "' to client\n";
-            } else {
-                std::cerr << "Server: failed to send Bob certificate\n";
-            }
-        } else {
-            std::cerr << "Server: Bob certificate not found at '" << bob_path << "'\n";
-        }
-    } catch (const std::exception &e) {
-        std::cerr << "Server: error sending Bob certificate: " << e.what() << "\n";
     }
 
     int opt = 1;
@@ -92,15 +90,84 @@ int main(int argc, char* argv[]) {
     // Server's RSA keys (n,e,d)
     int n = 836287813, e = 663980159, d = 707411039;
 
-    // After sending RSA pubkey, perform certificate exchange: receive a whole chain of CERT <file> messages
-    // The client will send multiple "CERT <filename> <hex>\n" messages and then a single "CERT_DONE\n" sentinel.
-    std::string line;
-    bool got_any_cert = false;
-    // Ensure received_certs directory exists
+    // Ensure received_certs and received_crl dirs exist
     try {
         std::filesystem::create_directories("./received_certs");
+        std::filesystem::create_directories("./received_crl");
     } catch (...) {}
 
+    // first receive CRL(s) from client, parse revoked serials, ack back
+    std::unordered_set<int> revoked_serials;
+    while (true) {
+        std::string in = recv_line(client_sock);
+        if (in.empty()) {
+            std::cerr << "Server: connection closed while waiting for CRL\n";
+            close(client_sock);
+            close(listen_sock);
+            return 1;
+        }
+        if (in == "CRL_DONE") {
+            break;
+        }
+        if (in.rfind("CRL ", 0) == 0) {
+            // parse "CRL <filename> <hexdata>"
+            std::istringstream iss(in);
+            std::string tag, filename, hexdata;
+            iss >> tag >> filename >> hexdata;
+            if (filename.empty() || hexdata.empty()) {
+                std::cerr << "Server: malformed CRL line\n";
+                continue;
+            }
+            // decode hex -> bytes
+            std::vector<unsigned char> bytes;
+            bytes = hex_to_bytes(hexdata);
+            
+            // save raw CRL file
+            try {
+                std::filesystem::path outp = std::filesystem::path("./received_crl") / filename;
+                std::ofstream ofs(outp, std::ios::binary);
+                ofs.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+                ofs.close();
+                std::cout << "Server: saved CRL to '" << outp.string() << "' (bytes=" << bytes.size() << ")\n";
+            } catch (const std::exception &ex) {
+                std::cerr << "Server: failed to save CRL file: " << ex.what() << "\n";
+            }
+            // parse CRL bytes (assume ASCII list of revoked serial ints)
+            std::string s(bytes.begin(), bytes.end());
+            std::istringstream siss(s);
+            int serial;
+            while (siss >> serial) {
+                revoked_serials.insert(serial);
+            }
+            continue;
+        }
+        // unexpected non-CRL line -> protocol error
+        std::cerr << "Server: expected CRL or CRL_DONE, got: '" << in << "'\n";
+        // for robustness, continue reading until CRL_DONE or close
+    }
+
+    // send CRL ack
+    if (!revoked_serials.empty()) {
+        if (!send_all(client_sock, std::string("CRL_OK\n"))) {
+            std::cerr << "Server: failed to send CRL_OK\n";
+            close(client_sock);
+            close(listen_sock);
+            return 1;
+        }
+        std::cout << "Server: parsed CRL, revoked count=" << revoked_serials.size() << "\n";
+    } else {
+        // no revoked entries but still ACK
+        if (!send_all(client_sock, std::string("CRL_OK\n"))) {
+            std::cerr << "Server: failed to send CRL_OK\n";
+            close(client_sock);
+            close(listen_sock);
+            return 1;
+        }
+        std::cout << "Server: no revoked entries found in CRL(s)\n";
+    }
+
+    // After CRL ack, expect certificate chain from client: multiple "CERT <file> <hex>\n" then "CERT_DONE\n"
+    bool got_any_cert = false;
     while (true) {
         std::string in = recv_line(client_sock);
         if (in.empty()) {
@@ -117,9 +184,53 @@ int main(int argc, char* argv[]) {
             // continue reading next cert
             continue;
         }
-        // Not a CERT line: treat as next protocol message (e.g., CRL or DH_INIT)
-        line = in;
+        // Not a CERT line: treat as next protocol message
+        // store and break out (unlikely at this stage)
         break;
+    }
+
+    // After receiving certs, check for any revoked certs among received cert files.
+    bool any_revoked = false;
+    try {
+        for (auto &entry : std::filesystem::directory_iterator("./received_certs")) {
+            if (!entry.is_regular_file()) continue;
+            if (entry.path().extension() != ".cert487") continue;
+            try {
+                auto cert = pki487::Cert487::from_file(entry.path().string());
+                if (revoked_serials.find(cert.serial) != revoked_serials.end()) {
+                    std::cerr << "Server: received certificate '" << entry.path().filename().string() << "' is revoked (serial=" << cert.serial << ")\n";
+                    any_revoked = true;
+                }
+            } catch (...) {
+                std::cerr << "Server: failed to parse received cert '" << entry.path().filename().string() << "'\n";
+            }
+        }
+    } catch (...) {}
+
+    if (any_revoked) {
+        // notify client and abort
+        send_all(client_sock, std::string("CERT_CHAIN_REJECTED\n"));
+        std::cerr << "Server: rejecting certificate chain due to CRL\n";
+        close(client_sock);
+        close(listen_sock);
+        return 1;
+    }
+
+    // If chain OK, send Bob's certificate back to the client
+    try {
+        std::string bob_path = "./certFiles/Bob.cert487";
+        if (std::filesystem::exists(bob_path) && std::filesystem::is_regular_file(bob_path)) {
+            std::string certmsg = make_file_message(bob_path, "CERT");
+            if (!certmsg.empty() && send_all(client_sock, certmsg)) {
+                std::cout << "Server: sent Bob certificate to client\n";
+            } else {
+                std::cerr << "Server: failed to send Bob certificate\n";
+            }
+        } else {
+            std::cerr << "Server: Bob certificate not found at '" << bob_path << "'\n";
+        }
+    } catch (const std::exception &e) {
+        std::cerr << "Server: error sending Bob certificate: " << e.what() << "\n";
     }
 
     // Build parse tree (graph) only from the received certs
@@ -229,20 +340,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Server: derived 10-bit S-DES key = " << sdes_key << " (" << sdes_key.to_ulong() << ")\n";
     SDESModes sdes(sdes_key);
 
-    // Helper: hex -> bytes (same format used by client)
-    auto hex_to_bytes = [](const std::string &hex) {
-        std::vector<unsigned char> out;
-        if (hex.size() % 2 != 0) return out;
-        for (size_t i = 0; i < hex.size(); i += 2) {
-            std::string byteStr = hex.substr(i, 2);
-            uint32_t byte;
-            std::stringstream ss;
-            ss << std::hex << byteStr;
-            ss >> byte;
-            out.push_back(static_cast<unsigned char>(byte));
-        }
-        return out;
-    };
+
 
     // Receive IV
     line = recv_line(client_sock);

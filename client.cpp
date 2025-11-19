@@ -69,17 +69,92 @@ int main(int argc, char* argv[]) {
     int n = 769864357, e = 142112703, d = 409609311;
 
     pki487::Cert487 bob_cert;
-    // Certificate exchange: send Alice cert to server, then receive server's cert (Bob) and save it
+
+    // send CRL first, wait server ack, then send cert chain (skip any certs revoked)
     try {
-        // Send the whole chain of certs (all .cert487 files in ./certFiles) to the server
+        namespace fs = std::filesystem;
+
+        // find first CRL file (optional)
+        std::optional<std::string> crl_path;
+        if (fs::exists("./crlFIles") && fs::is_directory("./crlFIles")) {
+            for (auto &entry : fs::directory_iterator("./crlFIles")) {
+                if (!entry.is_regular_file()) continue;
+                crl_path = entry.path().string();
+                break;
+            }
+        }
+
+        // helper to parse CRL bytes (assume ASCII list of revoked serial ints separated by whitespace/newline)
+        auto parse_crl_bytes = [](const std::vector<unsigned char>& bytes) {
+            std::unordered_set<int> revoked;
+            std::string s(bytes.begin(), bytes.end());
+            std::istringstream iss(s);
+            int x;
+            while (iss >> x) revoked.insert(x);
+            return revoked;
+        };
+
+        std::unordered_set<int> local_revoked; // used to avoid sending revoked certs
+
+        if (crl_path.has_value()) {
+            // read raw CRL bytes locally so we can parse and avoid sending revoked certs
+            std::ifstream ifs(*crl_path, std::ios::binary);
+            if (ifs) {
+                std::vector<unsigned char> crl_bytes((std::istreambuf_iterator<char>(ifs)),
+                                                     std::istreambuf_iterator<char>());
+                local_revoked = parse_crl_bytes(crl_bytes);
+            }
+
+            // send CRL to server (hex-encoded single-line message) and then send CRL_DONE
+            std::string crlmsg = make_file_message(*crl_path, "CRL");
+            if (!crlmsg.empty()) {
+                if (!send_all(sock, crlmsg)) {
+                    std::cerr << "Client: failed to send CRL file to server\n";
+                    close(sock);
+                    return 1;
+                }
+                std::cout << "Client: sent CRL '" << std::filesystem::path(*crl_path).filename().string() << "' to server\n";
+            }
+        }
+
+        // signal end of CRLs
+        if (!send_all(sock, std::string("CRL_DONE\n"))) {
+            std::cerr << "Client: failed to send CRL_DONE\n";
+            close(sock);
+            return 1;
+        }
+
+        // wait for server CRL acknowledgement
+        std::string crl_ack = recv_line(sock);
+        if (crl_ack != "CRL_OK") {
+            std::cerr << "Client: server rejected CRL or error: '" << crl_ack << "'\n";
+            close(sock);
+            return 1;
+        }
+        std::cout << "Client: server accepted CRL\n";
+
+        // Now send the whole chain of certs (all .cert487 files in ./certFiles) to the server,
+        // but skip any certificates that are listed in the local CRL.
         try {
-            namespace fs = std::filesystem;
             int sent_count = 0;
             if (fs::exists("./certFiles") && fs::is_directory("./certFiles")) {
                 for (auto &entry : fs::directory_iterator("./certFiles")) {
                     if (!entry.is_regular_file()) continue;
                     auto p = entry.path();
                     if (p.extension() != ".cert487") continue;
+                    // quick check: parse serial from file and skip if revoked
+                    bool skip = false;
+                    try {
+                        auto cert = pki487::Cert487::from_file(p.string());
+                        if (local_revoked.find(cert.serial) != local_revoked.end()) {
+                            std::cout << "Client: skipping sending revoked cert '" << p.filename().string() << "' (serial=" << cert.serial << ")\n";
+                            skip = true;
+                        }
+                    } catch (...) {
+                        // If parsing fails, still attempt to send file (server will validate)
+                    }
+                    if (skip) continue;
+
                     std::string certmsg = make_file_message(p.string(), "CERT");
                     if (certmsg.empty()) continue;
                     if (!send_all(sock, certmsg)) {
@@ -98,72 +173,39 @@ int main(int argc, char* argv[]) {
             std::cerr << "Client: error sending cert chain: " << ex.what() << "\n";
         }
 
-        // receive server's certificate
+        // receive server's certificate (Bob) after server validates the received chain
         std::string cert_line = recv_line(sock);
         if (!cert_line.empty()) {
-            bool ok = parse_and_save_file_message(cert_line, "./received_certs", "CERT");
-            auto added = certGraph.add_certs_from_directory("./received_certs");
-            bob_cert = pki487::Cert487::from_file("./received_certs/Bob.cert487");
-            if (ok) std::cout << "Client: received and saved server certificate to ./received_certs/\n";
-            else std::cerr << "Client: did not receive a valid CERT line from server\n";
-
-            // Attempt to find and verify a path from Alice to the received Bob cert.
-            if (added.has_value()) {
-                if (*added == 0) {
-                    std::cout << "Client: No new certificates were added from server to attempt path verification\n";
-                } else {
-                    const std::string &subject = bob_cert.subject;
-                    auto res = certGraph.find_path_by_subjects(std::string("Alice"), subject);
-                    if (!res.has_value()) {
-                        std::cout << "Client: Missing nodes for path check (Alice or " << subject << ")\n";
-                    } else if (res->first.empty()) {
-                        std::cout << "Client: No verified path found from Alice to '" << subject << "'\n";
-                    } else {
-                        std::cout << "Client: Found path from Alice to '" << subject << "':\n";
-                        std::cout << "  Path (serial:subject[trust]): ";
-                        for (int s : res->first) {
-                            auto itn = certGraph.nodes().find(s);
-                            if (itn != certGraph.nodes().end()) {
-                                std::cout << s << ":" << itn->second.subject << "[" << itn->second.cert.trust_level << "] ";
-                            } else {
-                                std::cout << s << " ";
-                            }
-                        }
-                        std::cout << "\n  Minimum trust on this path: " << res->second << "\n";
+            if (cert_line == "CERT_CHAIN_REJECTED") {
+                std::cerr << "Client: server rejected certificate chain\n";
+                close(sock);
+                return 1;
+            }
+            // Expect a CERT <filename> <hex> line containing Bob's cert
+            bool saved = parse_and_save_file_message(cert_line, "./received_certs", "CERT");
+            if (saved) {
+                std::cout << "Client: received and saved server certificate to ./received_certs/\n";
+                try {
+                    std::string bob_path = "./received_certs/Bob.cert487";
+                    if (std::filesystem::exists(bob_path) && std::filesystem::is_regular_file(bob_path)) {
+                        bob_cert = pki487::Cert487::from_file(bob_path);
+                        std::cout << "Client: loaded Bob certificate\n";
                     }
+                } catch (...) {
+                    std::cerr << "Client: failed to parse saved Bob certificate\n";
                 }
             } else {
-                std::cout << "No new certificates were added from server to attempt path verification\n";
+                std::cerr << "Client: failed to save server certificate line\n";
             }
         } else {
             std::cerr << "Client: no certificate line received from server\n";
         }
     } catch (const std::exception &e) {
-        std::cerr << "Client: certificate exchange error: " << e.what() << "\n";
+        std::cerr << "Client: certificate/CRL exchange error: " << e.what() << "\n";
     }
 
     auto server_n = bob_cert.subject_pubkey_pem.n;
     auto server_e = bob_cert.subject_pubkey_pem.exponent;
-
-    // After certificate exchange, send a CRL file (hex-encoded) if present
-    try {
-        namespace fs = std::filesystem;
-        if (fs::exists("./crlFIles") && fs::is_directory("./crlFIles")) {
-            for (auto &entry : fs::directory_iterator("./crlFIles")) {
-                if (!entry.is_regular_file()) continue;
-                std::string msg = make_file_message(entry.path().string(), "CRL");
-                if (msg.empty()) continue;
-                if (send_all(sock, msg)) {
-                    std::cout << "Client: sent CRL file '" << entry.path().filename().string() << "' (message length=" << msg.size() << ") to server\n";
-                } else {
-                    std::cerr << "Client: failed to send CRL file\n";
-                }
-                break; // send only one file
-            }
-        }
-    } catch (const std::exception &e) {
-        std::cerr << "Client: error sending CRL file: " << e.what() << "\n";
-    }
 
     // Now send signed Diffie-Hellman params: choose prime p and generator g and our public A
     int dh_p = 0, dh_g = -1;
