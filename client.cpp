@@ -71,17 +71,31 @@ int main(int argc, char* argv[]) {
     pki487::Cert487 bob_cert;
     // Certificate exchange: send Alice cert to server, then receive server's cert (Bob) and save it
     try {
-        // send Alice cert if present
-        std::string alice_path = "./certFiles/Alice.cert487";
-        if (std::filesystem::exists(alice_path) && std::filesystem::is_regular_file(alice_path)) {
-            std::string certmsg = make_file_message(alice_path, "CERT");
-            if (!certmsg.empty() && send_all(sock, certmsg)) {
-                std::cout << "Client: sent certificate '" << alice_path << "' to server\n";
-            } else {
-                std::cerr << "Client: failed to send Alice certificate\n";
+        // Send the whole chain of certs (all .cert487 files in ./certFiles) to the server
+        try {
+            namespace fs = std::filesystem;
+            int sent_count = 0;
+            if (fs::exists("./certFiles") && fs::is_directory("./certFiles")) {
+                for (auto &entry : fs::directory_iterator("./certFiles")) {
+                    if (!entry.is_regular_file()) continue;
+                    auto p = entry.path();
+                    if (p.extension() != ".cert487") continue;
+                    std::string certmsg = make_file_message(p.string(), "CERT");
+                    if (certmsg.empty()) continue;
+                    if (!send_all(sock, certmsg)) {
+                        std::cerr << "Client: failed to send certificate '" << p.string() << "'\n";
+                        continue;
+                    }
+                    ++sent_count;
+                    std::cout << "Client: sent certificate '" << p.filename().string() << "' to server\n";
+                }
             }
-        } else {
-            std::cerr << "Client: Alice certificate not found at '" << alice_path << "'\n";
+            // Signal end of chain
+            std::string done = "CERT_DONE\n";
+            send_all(sock, done);
+            std::cout << "Client: sent CERT_DONE (" << sent_count << " files)\n";
+        } catch (const std::exception &ex) {
+            std::cerr << "Client: error sending cert chain: " << ex.what() << "\n";
         }
 
         // receive server's certificate

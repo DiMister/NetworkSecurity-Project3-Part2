@@ -73,8 +73,9 @@ uint32_t Rsa::mod_pow(uint32_t base, uint32_t exp, uint32_t mod) {
     return static_cast<uint32_t>(result);
 }
 
+// asked chat-gpt to make a simple hash function to replace cbc because I didn't realize cbc could work
+// now it just less convient to remove this
 // Simple message digest: produce an integer in [0, mod-1]. This is NOT cryptographically strong
-// but satisfies the requirement: made from message and verifiable with public key.
 uint32_t Rsa::compute_digest(const std::string& msg, uint32_t mod) {
     if (mod == 0) return 0;
     // A simple rolling accumulator mixing byte values and positions

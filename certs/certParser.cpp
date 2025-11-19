@@ -10,6 +10,7 @@
 
 namespace pki487 {
 
+// ask chat-gpt for a function to parse and read in a certificate from a file and add to graph
 std::optional<std::error_code> CertGraph::add_cert_from_text(const std::string& text) {
     try {
         Cert487 c = Cert487::parse(text);
@@ -86,6 +87,7 @@ std::optional<int> CertGraph::add_certs_from_directory(const std::string& dirpat
     return added;
 }
 
+// Created parents and childen relationships between nodes based on subject/issuer matching
 void CertGraph::build_edges() {
     // Rebuild subject index
     _subject_index.clear();
@@ -119,6 +121,7 @@ void CertGraph::build_edges() {
     }
 }
 
+// Worked with chat-gpt to develop a breadth-first search function
 // Depth-first search helper (iterative implementation).
 // Return semantics:
 //  - std::nullopt => one or both of the start/target serials are not present in `nodes`.

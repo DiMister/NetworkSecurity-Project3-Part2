@@ -13,6 +13,7 @@ static std::string field(const std::string& k, const std::string& v) {
     return k + ": " + v + "\n";
 }
 
+//asked chat-gpt to create a format for cert files, then added missing fields
 std::string Cert487::serialize_tbs() const {
     std::ostringstream ss;
     ss << "-----BEGIN CERT487-----\n";
@@ -43,6 +44,7 @@ std::string Cert487::serialize_full() const {
     return ss.str();
 }
 
+// asked chat-gpt to parse a certificate from text
 Cert487 Cert487::parse(const std::string& text) {
     Cert487 c;
     auto canon = canonicalize_newlines(text);

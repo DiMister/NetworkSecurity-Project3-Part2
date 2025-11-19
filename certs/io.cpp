@@ -11,7 +11,7 @@
 #endif
 
 namespace pki487 {
-
+// Helpers created with chat-gpt to read and write text files and simple string utilities
 std::string read_text_file(const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) throw std::runtime_error("Cannot open file: " + path);
