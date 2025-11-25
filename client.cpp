@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include "./certs/certParser.hpp"
+#include "./certs/Rsa.hpp"
 #include <algorithm>
 
 int main(int argc, char* argv[]) {
@@ -206,6 +207,63 @@ int main(int argc, char* argv[]) {
 
     auto server_n = bob_cert.subject_pubkey_pem.n;
     auto server_e = bob_cert.subject_pubkey_pem.exponent;
+
+    // send a seperate key which is randomly generated using signed RSA
+    // That is we enrypt with server's public key (n,e) and sign with client's private key (d,n)
+
+    // Generate a random 8-bit key, print it, then encrypt with server's public key
+    // and sign with client's private key. We do NOT use this key for anything
+    // else — it's just printed/sent as requested.
+    {
+        // generate random 8-bit value
+        std::random_device rd_key;
+        std::mt19937 gen_key(rd_key());
+        std::uniform_int_distribution<int> dist8(0, 255);
+        uint8_t random_key = static_cast<uint8_t>(dist8(gen_key));
+
+        // Print the raw random key (decimal and hex)
+        std::ostringstream koss;
+        koss << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(random_key);
+        std::cout << "Client: generated random 8-bit key = " << static_cast<int>(random_key)
+                  << " (" << koss.str() << ")" << std::dec << std::setfill(' ') << std::endl;
+
+        // RSA-encrypt the 8-bit key with server's public key: c = key^e mod n
+        // and sign the 8-bit key with client's private key: s = key^d mod n
+        uint32_t key_val = static_cast<uint32_t>(random_key);
+        uint32_t enc_key = 0u;
+        uint32_t sig_key = 0u;
+        try {
+            pki487::keypair server_pub{static_cast<uint32_t>(server_n), static_cast<uint32_t>(server_e)};
+            pki487::keypair client_priv{static_cast<uint32_t>(n), static_cast<uint32_t>(d)};
+            enc_key = pki487::Rsa::encrypt_uint32(key_val, server_pub);
+            sig_key = pki487::Rsa::sign_uint32(key_val, client_priv);
+        } catch (const std::exception &ex) {
+            std::cerr << "Client: RSA operation failed: " << ex.what() << "\n";
+        }
+
+        // Print encrypted and signed numeric values (decimal + hex)
+        auto print_u32 = [&](const std::string &label, uint32_t v) {
+            std::ostringstream oss;
+            oss << "0x" << std::hex << v;
+            std::cout << "Client: " << label << " = " << std::dec << v << " (" << oss.str() << ")" << std::endl;
+        };
+        print_u32("encrypted_key", enc_key);
+        print_u32("signed_key", sig_key);
+
+        // Send to server in a simple textual form: KEY <enc_hex> <sig_hex>\n
+        auto u32_to_hex = [&](uint32_t v) {
+            std::ostringstream oss;
+            oss << std::hex << std::setw(8) << std::setfill('0') << v;
+            return oss.str();
+        };
+        std::string keymsg = std::string("KEY ") + u32_to_hex(enc_key) + " " + u32_to_hex(sig_key) + "\n";
+        if (!send_all(sock, keymsg)) {
+            std::cerr << "Client: failed to send KEY message to server\n";
+        } else {
+            std::cout << "Client: sent KEY message to server\n";
+        }
+    }
+
 
     // Now send signed Diffie-Hellman params: choose prime p and generator g and our public A
     int dh_p = 0, dh_g = -1;

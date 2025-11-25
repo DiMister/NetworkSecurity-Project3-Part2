@@ -30,5 +30,13 @@ namespace pki487 {
 
         // Verify signature bytes against TBS and public keypair
         static bool verify_message(const std::string& tbs, const keypair& pub, const std::vector<unsigned char>& sig_bytes);
+
+        // Numeric helpers for simple demo use: encrypt/decrypt a 32-bit value
+        static uint32_t encrypt_uint32(uint32_t m, const keypair& pub);
+        static uint32_t decrypt_uint32(uint32_t c, const keypair& priv);
+
+        // Numeric sign/verify (operate directly on integers)
+        static uint32_t sign_uint32(uint32_t m, const keypair& priv);
+        static bool verify_uint32(uint32_t m, uint32_t sig, const keypair& pub);
     };
 }

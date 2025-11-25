@@ -15,6 +15,7 @@
 #include "./Helpers/DiffeHellman.hpp"
 #include "./Helpers/SDESModes.hpp"
 #include "./certs/certParser.hpp"
+#include "./certs/Rsa.hpp"
 #include <bitset>
 #include <thread>
 #include <sstream>
@@ -267,14 +268,39 @@ int main(int argc, char* argv[]) {
         std::cerr << "Server: error sending Bob certificate: " << e.what() << "\n";
     }
 
-    // Now expect signed Diffie-Hellman init from client: "DH_INIT <p> <g> <A> <sig>\n"
+    // Before DH_INIT we may receive a KEY message; read lines until DH_INIT
+    std::string line;
     line = recv_line(client_sock);
-    if (line.rfind("DH_INIT ", 0) != 0) {
-        std::cerr << "Server: expected DH_INIT, got '" << line << "'\n";
-        close(client_sock);
-        close(listen_sock);
-        return 1;
-    }
+    if (line.rfind("KEY ", 0) == 0) {
+        // parse KEY <enc_hex> <sig_hex>
+        std::istringstream iss(line);
+        std::string tag, hexenc, hexsig;
+        iss >> tag >> hexenc >> hexsig;
+        if (hexenc.empty() || hexsig.empty()) {
+            std::cerr << "Server: malformed KEY line\n";
+            continue;
+        }
+        try {
+            uint32_t enc_val = static_cast<uint32_t>(std::stoul(hexenc, nullptr, 16));
+            uint32_t sig_val = static_cast<uint32_t>(std::stoul(hexsig, nullptr, 16));
+
+            pki487::keypair server_priv{static_cast<uint32_t>(n), static_cast<uint32_t>(d)};
+            uint32_t recovered_key = pki487::Rsa::decrypt_uint32(enc_val, server_priv);
+            std::cout << "Server: received KEY message, decrypted value=" << recovered_key << "\n";
+
+            // verify signature using client's public key (if available)
+            pki487::keypair client_pub{static_cast<uint32_t>(client_n), static_cast<uint32_t>(client_e)};
+            bool sig_ok = false;
+            try {
+                sig_ok = pki487::Rsa::verify_uint32(recovered_key, sig_val, client_pub);
+            } catch (...) { sig_ok = false; }
+            std::cout << "Server: KEY signature verification=" << (sig_ok ? "OK" : "FAILED") << "\n";
+        } catch (const std::exception &ex) {
+            std::cerr << "Server: error parsing KEY hex: " << ex.what() << "\n";
+        }
+    } else {
+        printf("Server: expected KEY, got '%s'\n", line.c_str());
+    }   
 
     // parse p g A sig
     uint32_t dh_p = 0u, dh_g = 0u, A = 0u, sigA = 0u;

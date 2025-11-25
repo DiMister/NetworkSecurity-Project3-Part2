@@ -128,4 +128,26 @@ bool Rsa::verify_message(const std::string& tbs, const keypair& pub, const std::
     return recovered == expect;
 }
 
+// Numeric helpers: encrypt/decrypt/sign/verify for 32-bit values (demo only)
+uint32_t Rsa::encrypt_uint32(uint32_t m, const keypair& pub) {
+    if (pub.n == 0) throw std::runtime_error("Invalid public modulus");
+    return mod_pow(m % pub.n, pub.exponent, pub.n);
+}
+
+uint32_t Rsa::decrypt_uint32(uint32_t c, const keypair& priv) {
+    if (priv.n == 0) throw std::runtime_error("Invalid private modulus");
+    return mod_pow(c % priv.n, priv.exponent, priv.n);
+}
+
+uint32_t Rsa::sign_uint32(uint32_t m, const keypair& priv) {
+    if (priv.n == 0) throw std::runtime_error("Invalid private modulus");
+    return mod_pow(m % priv.n, priv.exponent, priv.n);
+}
+
+bool Rsa::verify_uint32(uint32_t m, uint32_t sig, const keypair& pub) {
+    if (pub.n == 0) return false;
+    uint32_t recovered = mod_pow(sig, pub.exponent, pub.n);
+    return recovered == static_cast<uint32_t>(m % pub.n);
+}
+
 } // namespace pki487
