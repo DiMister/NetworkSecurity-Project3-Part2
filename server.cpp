@@ -15,7 +15,6 @@
 #include "./Helpers/DiffeHellman.hpp"
 #include "./Helpers/SDESModes.hpp"
 #include "./certs/certParser.hpp"
-#include "./certs/Rsa.hpp"
 #include <bitset>
 #include <thread>
 #include <sstream>

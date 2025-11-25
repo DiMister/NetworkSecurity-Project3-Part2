@@ -20,7 +20,6 @@
 #include <filesystem>
 #include <fstream>
 #include "./certs/certParser.hpp"
-#include "./certs/Rsa.hpp"
 #include <algorithm>
 
 int main(int argc, char* argv[]) {
