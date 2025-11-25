@@ -230,23 +230,6 @@ int main(int argc, char* argv[]) {
     auto client_n = alice_cert.subject_pubkey_pem.n;
     auto client_e = alice_cert.subject_pubkey_pem.exponent;
 
-    // Send server's certificate (Bob) back to the client after we've processed the received chain.
-    try {
-        std::string bob_path = "./certFiles/Bob.cert487";
-        if (std::filesystem::exists(bob_path) && std::filesystem::is_regular_file(bob_path)) {
-            std::string certmsg = make_file_message(bob_path, "CERT");
-            if (!certmsg.empty() && send_all(client_sock, certmsg)) {
-                std::cout << "Server: sent certificate '" << bob_path << "' to client\n";
-            } else {
-                std::cerr << "Server: failed to send Bob certificate\n";
-            }
-        } else {
-            std::cerr << "Server: Bob certificate not found at '" << bob_path << "'\n";
-        }
-    } catch (const std::exception &e) {
-        std::cerr << "Server: error sending Bob certificate: " << e.what() << "\n";
-    }
-
     // Before DH_INIT we may receive a KEY message; read lines until DH_INIT
     std::string line;
     line = recv_line(client_sock);
@@ -257,7 +240,6 @@ int main(int argc, char* argv[]) {
         iss >> tag >> hexenc >> hexsig;
         if (hexenc.empty() || hexsig.empty()) {
             std::cerr << "Server: malformed KEY line\n";
-            continue;
         }
         try {
             uint32_t enc_val = static_cast<uint32_t>(std::stoul(hexenc, nullptr, 16));
@@ -282,7 +264,7 @@ int main(int argc, char* argv[]) {
     }   
     
     // Now expect signed Diffie-Hellman init from client: "DH_INIT <p> <g> <A> <sig>\n"
-    std::string line = recv_line(client_sock);
+    line = recv_line(client_sock);
     if (line.rfind("DH_INIT ", 0) != 0) {
         std::cerr << "Server: expected DH_INIT, got '" << line << "'\n";
         close(client_sock);
